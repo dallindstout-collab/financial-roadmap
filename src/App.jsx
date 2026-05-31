@@ -34,7 +34,7 @@ const BG = {
 /* ─────────────────────────────────────────────────────────────
    FINNHUB
 ───────────────────────────────────────────────────────────── */
-const FINNHUB_KEY = "d8dnuvhr01qhm4ag7qe0d8dnuvhr01qhm4ag7qeg";
+const FINNHUB_KEY = "d8do22pr01qhm4ag8c30d8do22pr01qhm4ag8c3g";
 const TICKERS = ["VOO","QQQ","DIA","VTI","VXUS","VT"];
 
 /* ─────────────────────────────────────────────────────────────

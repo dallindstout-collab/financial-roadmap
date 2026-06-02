@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
-  LineChart, Line,
+  LineChart, Line, Legend, Customized,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from "recharts";
 
@@ -69,6 +69,8 @@ button{cursor:pointer;font-family:'DM Mono',monospace}
 .fu4{animation-delay:0.16s}.fu5{animation-delay:0.20s}.fu6{animation-delay:0.24s}
 @keyframes pulseGlow{0%,100%{box-shadow:0 0 8px rgba(129,140,248,0.3)}50%{box-shadow:0 0 18px rgba(129,140,248,0.7)}}
 .pulse-add{animation:pulseGlow 2.5s ease-in-out infinite}
+@keyframes navShimmer{0%{opacity:0;transform:translateX(-160%) skewX(-10deg)}30%{opacity:1}70%{opacity:1}100%{opacity:0;transform:translateX(260%) skewX(-10deg)}}
+.nav-shimmer::after{content:"";position:absolute;inset:-10px;background:linear-gradient(105deg,transparent 5%,rgba(200,215,255,0.75) 30%,rgba(235,240,255,0.97) 50%,rgba(200,215,255,0.75) 70%,transparent 95%);animation:navShimmer 0.76s cubic-bezier(0.4,0,0.6,1) forwards;pointer-events:none;z-index:999}
 `;
 
 /* ─────────────────────────────────────────────────────────────
@@ -468,6 +470,26 @@ function buildMortgageData(mortgages, startYear, maxYear, lifeEvents) {
   return pts;
 }
 
+
+// Renders legend text directly inside the SVG plot area (top-left of data area)
+function InPlotLegend({ items, xOffset=6, lineLen=18 }) {
+  return ({ xAxisMap, yAxisMap, width, height, margin }) => {
+    const plotLeft = (margin?.left||0) + (Object.values(xAxisMap||{})[0]?.x || 86);
+    const plotTop  = (margin?.top||0) + 8;
+    return (
+      <g>
+        {items.map((item, i) => (
+          <g key={i} transform={`translate(${plotLeft + xOffset}, ${plotTop + i*18})`}>
+            <line x1={0} y1={5} x2={lineLen} y2={5} stroke={item.color} strokeWidth={2}
+              strokeDasharray={item.dash||"none"}/>
+            <text x={lineLen+5} y={9} fill="rgba(255,255,255,0.75)" fontSize={10}
+              fontFamily="DM Mono,monospace">{item.label}</text>
+          </g>
+        ))}
+      </g>
+    );
+  };
+}
 /* ─────────────────────────────────────────────────────────────
    SALARY PANEL
 ───────────────────────────────────────────────────────────── */
@@ -573,9 +595,10 @@ function SalaryPanel({ salaryState, setSalaryState }) {
   const setLifeEvents = v => setSalaryState(s => ({...s, lifeEvents: typeof v==="function" ? v(s.lifeEvents||[]) : v}));
 
   // view state removed - all charts are line only
-  const [chartRange, setChartRange] = useState(100); // % of data to show (100 = full range)
+  const [chartRange, setChartRange] = useState(100);
+  const [showSetup,  setShowSetup]  = useState(true); // % of data to show (100 = full range)
   const [activeYear, setActiveYear] = useState(null);
-  const [eventForm,  setEventForm]  = useState({ type: "promotion", pct: "", salary: "", role: "", company: "", k401Pct: null, homePrice:"", downPct:"20", mortgageRate:"", mortgageTerm:30, investTicker:"", investPct:null, sellHome:false, useEquity:false, useInvestments:false, lifeLabel:"", lifeAmount:"", lifeType:"expense" });
+  const [eventForm,  setEventForm]  = useState({ type: "promotion", pct: "", salary: "", role: "", company: "", k401Pct: null, homePrice:"", downPct:"20", mortgageRate:"", mortgageTerm:30, investTicker:"", investPct:null, investReturn:7, sellHome:false, useEquity:false, useInvestments:false, lifeLabel:"", lifeAmount:"", lifeType:"expense" });
   const [setupError, setSetupError] = useState("");
 
   const hasStart = entries.length > 0;
@@ -613,6 +636,7 @@ function SalaryPanel({ salaryState, setSalaryState }) {
     setStartYear(y);
     const startAge = parseInt(setupForm.age) || null;
     setEntries([{ year: y, salary: s, role: setupForm.role.trim() || "Starting role", company: setupForm.company.trim(), type: "start", startAge }]);
+    setShowSetup(false);
   };
 
   // Get the projected salary for a given year (used when opening a year row)
@@ -680,11 +704,11 @@ function SalaryPanel({ salaryState, setSalaryState }) {
       });
     }
     setActiveYear(null);
-    setEventForm({ type: "promotion", pct: "", salary: "", role: "", company: "", k401Pct: null, homePrice:"", downPct:"20", mortgageRate:"", mortgageTerm:30, investTicker:"", investPct:null, sellHome:false, useEquity:false, useInvestments:false, lifeLabel:"", lifeAmount:"", lifeType:"expense" });
+    setEventForm({ type: "promotion", pct: "", salary: "", role: "", company: "", k401Pct: null, homePrice:"", downPct:"20", mortgageRate:"", mortgageTerm:30, investTicker:"", investPct:null, investReturn:7, sellHome:false, useEquity:false, useInvestments:false, lifeLabel:"", lifeAmount:"", lifeType:"expense" });
   };
 
   const removeEntry = (year) => {
-    if (year === startYear) { setEntries([]); return; }
+    if (year === startYear) { setEntries([]); setShowSetup(true); return; }
     setEntries(prev => prev.filter(e => e.year !== year));
   };
 
@@ -700,61 +724,69 @@ function SalaryPanel({ salaryState, setSalaryState }) {
   const yT  = { fill:T.text1, fontSize:12, fontFamily:"DM Mono" };
 
 
-  // ── SETUP SCREEN ──────────────────────────────────────────
-  if (!hasStart) {
-    return (
-      <BgPanel id="salary" scroll>
-        <div style={{minHeight:"100%",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"3rem 2rem"}}>
-          <div className="fu" style={{textAlign:"center",marginBottom:"2rem"}}>
-            <h1 style={{fontFamily:"'Syne',sans-serif",fontSize:32,fontWeight:800,color:"#fff",letterSpacing:"-0.03em",marginBottom:8}}>
-              Your Roadmap<span style={{color:T.accent}}>.</span>
-            </h1>
-            <p style={{color:"rgba(255,255,255,0.45)",fontSize:13,letterSpacing:"0.04em"}}>Every great journey starts with a first step. Tell us where you are today.</p>
-          </div>
-          <Card className="fu fu2" style={{maxWidth:520,width:"100%"}}>
-            <div style={{fontSize:11,color:"rgba(255,255,255,0.4)",letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:"1.25rem"}}>Your Starting Point</div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:10}}>
-              <div>
-                <div style={{fontSize:10,color:"rgba(255,255,255,0.35)",marginBottom:5,letterSpacing:"0.08em"}}>START YEAR</div>
-                <input type="number" placeholder={String(currentYear)} value={setupForm.year}
-                  onChange={e=>setSetupForm(f=>({...f,year:e.target.value}))}
-                  onKeyDown={e=>e.key==="Enter"&&commitStart()}/>
-              </div>
-              <div>
-                <div style={{fontSize:10,color:"rgba(255,255,255,0.35)",marginBottom:5,letterSpacing:"0.08em"}}>YOUR AGE</div>
-                <input type="number" placeholder="28" value={setupForm.age||""}
-                  onChange={e=>setSetupForm(f=>({...f,age:e.target.value}))}
-                  onKeyDown={e=>e.key==="Enter"&&commitStart()}/>
-              </div>
-              <div>
-                <div style={{fontSize:10,color:"rgba(255,255,255,0.35)",marginBottom:5,letterSpacing:"0.08em"}}>STARTING SALARY ($)</div>
-                <input type="number" placeholder="75000" value={setupForm.salary}
-                  onChange={e=>setSetupForm(f=>({...f,salary:e.target.value}))}
-                  onKeyDown={e=>e.key==="Enter"&&commitStart()}/>
-              </div>
-            </div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}}>
-              <div>
-                <div style={{fontSize:10,color:"rgba(255,255,255,0.35)",marginBottom:5,letterSpacing:"0.08em"}}>ROLE / TITLE</div>
-                <input type="text" placeholder="Software Engineer" value={setupForm.role}
-                  onChange={e=>setSetupForm(f=>({...f,role:e.target.value}))}/>
-              </div>
-              <div>
-                <div style={{fontSize:10,color:"rgba(255,255,255,0.35)",marginBottom:5,letterSpacing:"0.08em"}}>COMPANY</div>
-                <input type="text" placeholder="Acme Corp" value={setupForm.company}
-                  onChange={e=>setSetupForm(f=>({...f,company:e.target.value}))}/>
-              </div>
-            </div>
-            {setupError && <div style={{fontSize:12,color:T.red,marginBottom:10}}>{setupError}</div>}
-            <button onClick={commitStart} style={{
-              width:"100%",padding:"11px",background:T.accent,border:"none",borderRadius:8,
-              color:"#fff",fontSize:13,fontWeight:500,letterSpacing:"0.04em",cursor:"pointer",
-            }}>Build My Roadmap →</button>
-          </Card>
+  // ── SETUP MODAL JSX (inline variable, NOT a component, to avoid remount on re-render) ──
+  const setupModalJSX = showSetup && (
+    <div style={{
+      position:"absolute",inset:0,zIndex:50,
+      display:"flex",alignItems:"center",justifyContent:"center",
+      background:"rgba(0,0,0,0.72)",backdropFilter:"blur(4px)",
+    }}
+      onClick={e=>e.stopPropagation()}>
+      <div style={{
+        background:T.bg2,border:`1px solid ${T.borderHi}`,borderRadius:16,
+        padding:"2rem",maxWidth:480,width:"calc(100% - 3rem)",
+        boxShadow:"0 24px 80px rgba(0,0,0,0.8)",
+      }}>
+        <div style={{textAlign:"center",marginBottom:"1.5rem"}}>
+          <div style={{fontSize:28,marginBottom:8}}>🗺️</div>
+          <h2 style={{fontFamily:"'Syne',sans-serif",fontSize:22,fontWeight:800,color:"#fff",letterSpacing:"-0.02em",marginBottom:6}}>
+            Your Starting Point
+          </h2>
+          <p style={{color:"rgba(255,255,255,0.4)",fontSize:12,lineHeight:1.5}}>Tell us where your career began and we'll build your full roadmap from there.</p>
         </div>
-      </BgPanel>
-    );
-  }
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:10}}>
+          <div>
+            <div style={{fontSize:10,color:"rgba(255,255,255,0.35)",marginBottom:5,letterSpacing:"0.08em"}}>START YEAR</div>
+            <input type="number" placeholder={String(currentYear)} value={setupForm.year}
+              onChange={e=>setSetupForm(f=>({...f,year:e.target.value}))}
+              onKeyDown={e=>e.key==="Enter"&&commitStart()}/>
+          </div>
+          <div>
+            <div style={{fontSize:10,color:"rgba(255,255,255,0.35)",marginBottom:5,letterSpacing:"0.08em"}}>YOUR AGE</div>
+            <input type="number" placeholder="22" value={setupForm.age||""}
+              onChange={e=>setSetupForm(f=>({...f,age:e.target.value}))}
+              onKeyDown={e=>e.key==="Enter"&&commitStart()}/>
+          </div>
+          <div>
+            <div style={{fontSize:10,color:"rgba(255,255,255,0.35)",marginBottom:5,letterSpacing:"0.08em"}}>STARTING SALARY ($)</div>
+            <input type="number" placeholder="60000" value={setupForm.salary}
+              onChange={e=>setSetupForm(f=>({...f,salary:e.target.value}))}
+              onKeyDown={e=>e.key==="Enter"&&commitStart()}/>
+          </div>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}}>
+          <div>
+            <div style={{fontSize:10,color:"rgba(255,255,255,0.35)",marginBottom:5,letterSpacing:"0.08em"}}>ROLE / TITLE</div>
+            <input type="text" placeholder="Software Engineer" value={setupForm.role}
+              onChange={e=>setSetupForm(f=>({...f,role:e.target.value}))}
+              onKeyDown={e=>e.key==="Enter"&&commitStart()}/>
+          </div>
+          <div>
+            <div style={{fontSize:10,color:"rgba(255,255,255,0.35)",marginBottom:5,letterSpacing:"0.08em"}}>COMPANY</div>
+            <input type="text" placeholder="Acme Corp" value={setupForm.company}
+              onChange={e=>setSetupForm(f=>({...f,company:e.target.value}))}
+              onKeyDown={e=>e.key==="Enter"&&commitStart()}/>
+          </div>
+        </div>
+        {setupError && <div style={{fontSize:12,color:T.red,marginBottom:10}}>{setupError}</div>}
+        <button onClick={commitStart} style={{
+          width:"100%",padding:"12px",background:T.accent,border:"none",borderRadius:10,
+          color:"#fff",fontSize:14,fontWeight:600,cursor:"pointer",letterSpacing:"0.02em",
+          boxShadow:"0 0 24px rgba(129,140,248,0.4)",
+        }}>Build My Roadmap →</button>
+      </div>
+    </div>
+  );
 
   // ── MAIN TIMELINE VIEW ────────────────────────────────────
   const startAge = firstEntry?.startAge || null;
@@ -783,6 +815,8 @@ function SalaryPanel({ salaryState, setSalaryState }) {
   const sliceEnd = Math.max(1, Math.round(chartData.length * chartRange / 100));
   const chartDataSliced = chartData.slice(0, sliceEnd);
   const mortgageDataSliced = mortgageData.slice(0, sliceEnd);
+  // Dynamic tick interval: always show at least 5 ticks
+  const xInterval = Math.max(0, Math.floor(sliceEnd / 5) - 1);
   // Age range labels for slider display
   const minAgeLabel = chartData[0]?.age ?? (startAge ?? startYear);
   const maxAgeLabel = chartData[sliceEnd-1]?.age ?? (startAge ? startAge + sliceEnd - 1 : startYear + sliceEnd - 1);
@@ -799,15 +833,34 @@ function SalaryPanel({ salaryState, setSalaryState }) {
     }}>
       {/* Dark overlay */}
       <div style={{position:"absolute",inset:0,background:"rgba(0,0,0,0.82)",pointerEvents:"none",zIndex:0}}/>
+      {/* Block all clicks until setup is done — sits below the modal (z:50) but above content (z:1) */}
+      {!hasStart && <div style={{position:"absolute",inset:0,zIndex:49,pointerEvents:"all",background:"transparent"}}
+        onClick={e=>e.stopPropagation()} onMouseDown={e=>e.stopPropagation()}/>}
+      {/* Setup modal — rendered at panel root so z:50 beats the z:49 blocker */}
+      {setupModalJSX}
       {/* Frozen top section */}
       <div style={{position:"relative",zIndex:1,flexShrink:0,padding:"0.6rem 2rem 0.5rem",overflowY:"visible"}}>
 
-        {/* Reset button — minimal, top right */}
-        <div style={{display:"flex",justifyContent:"flex-end",marginBottom:"0.4rem"}}>
-          <button onClick={()=>setEntries([])} style={{
-            fontSize:11,color:T.text2,background:"transparent",border:`1px solid ${T.border}`,
-            borderRadius:6,padding:"4px 10px",cursor:"pointer",
-          }}>↺ Reset</button>
+        {/* Top bar: starting point summary + edit + reset */}
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"0.4rem",gap:8}}>
+          {hasStart && firstEntry && (
+            <div style={{fontSize:11,color:T.text2,display:"flex",alignItems:"center",gap:10}}>
+              <span style={{color:T.gold,fontWeight:600}}>{firstEntry.role||"Career"}</span>
+              <span>started {firstEntry.year}{startAge?` · Age ${startAge}`:""}</span>
+              <span>·</span>
+              <span style={{color:T.text1}}>{fmt(firstEntry.salary)}</span>
+            </div>
+          )}
+          <div style={{display:"flex",gap:6,marginLeft:"auto"}}>
+            {hasStart && <button onClick={()=>setShowSetup(true)} style={{
+              fontSize:11,color:T.accent,background:T.accentDim,border:`1px solid ${T.accent}`,
+              borderRadius:6,padding:"4px 10px",cursor:"pointer",
+            }}>✏️ Edit Start</button>}
+            <button onClick={()=>{setEntries([]);setShowSetup(true);}} style={{
+              fontSize:11,color:T.text2,background:"transparent",border:`1px solid ${T.border}`,
+              borderRadius:6,padding:"4px 10px",cursor:"pointer",
+            }}>↺ Reset</button>
+          </div>
         </div>
 
         {/* Roadmap Timeline Visual */}
@@ -827,31 +880,22 @@ function SalaryPanel({ salaryState, setSalaryState }) {
 
           {/* 401k + Investments chart */}
           <div style={{background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:10,padding:"0.75rem",overflow:"visible"}}>
-            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"0.6rem"}}>
-              <div>
-                <span style={{fontSize:15,color:"rgba(255,255,255,0.6)",letterSpacing:"0.04em",textTransform:"uppercase"}}>401k, Investments & Net Worth</span>
-
-              </div>
-              <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
-                <span style={{display:"flex",alignItems:"center",gap:6,fontSize:16,color:T.text1}}>
-                  <span style={{width:18,height:3,background:T.green,display:"inline-block",borderRadius:1}}/>401k
-                </span>
-                <span style={{display:"flex",alignItems:"center",gap:6,fontSize:16,color:T.text1}}>
-                  <span style={{width:18,height:3,background:T.gold,display:"inline-block",borderRadius:1}}/>Investments
-                </span>
-                <span style={{display:"flex",alignItems:"center",gap:6,fontSize:16,color:T.text1}}>
-                  <span style={{width:18,height:3,background:"#a78bfa",display:"inline-block",borderRadius:1}}/>Net Worth
-                </span>
-              </div>
+            <div style={{marginBottom:"0.6rem",textAlign:"center"}}>
+              <span style={{fontSize:13,color:"rgba(255,255,255,0.6)",letterSpacing:"0.04em",textTransform:"uppercase"}}>401k, Investments & Net Worth</span>
             </div>
-            <ResponsiveContainer width="100%" height={735}>
-              <LineChart data={chartDataSliced}>
+            <ResponsiveContainer width="100%" height={490}>
+              <LineChart data={chartDataSliced} margin={{top:8,right:8,left:0,bottom:20}}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" vertical={true} horizontal={true}/>
-                <XAxis dataKey="age" tick={xT} {...axP} interval={4}
+                <XAxis dataKey="age" tick={xT} {...axP} interval={xInterval}
                   tickFormatter={v => v != null ? `${v}` : ""}
                   label={{value:"Age",position:"insideBottom",offset:-2,fill:T.text2,fontSize:12}}/>
                 <YAxis tickFormatter={fmtK} tick={yT} {...axP} width={86} tickCount={10}/>
                 <Tooltip content={<SalTip/>}/>
+                <Customized component={InPlotLegend({items:[
+                  {color:T.green,  label:"401k"},
+                  {color:T.gold,   label:"Investments"},
+                  {color:"#a78bfa",label:"Net Worth",dash:"6 3"},
+                ]})}/>
                 <Line type="monotone" dataKey="netWorth" stroke="#a78bfa" strokeWidth={2} strokeDasharray="6 3"
                   dot={({cx,cy,payload})=>payload.isEvent?<circle key={cx} cx={cx} cy={cy} r={5} fill="#a78bfa" stroke={T.bg0} strokeWidth={2}/>:<g key={cx}/>}
                   activeDot={{r:7,fill:"#a78bfa",stroke:T.bg0,strokeWidth:2}}/>
@@ -867,34 +911,36 @@ function SalaryPanel({ salaryState, setSalaryState }) {
 
           {/* Mortgage chart */}
           <div style={{background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:10,padding:"0.75rem",overflow:"visible"}}>
-            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"0.6rem"}}>
-              <div>
-                <span style={{fontSize:15,color:"rgba(255,255,255,0.6)",letterSpacing:"0.04em",textTransform:"uppercase"}}>Home Ownership</span>
-                {mortgages.length > 0 ? <span style={{marginLeft:8,fontSize:10,color:T.accent,background:T.accentDim,padding:"2px 7px",borderRadius:3}}>{mortgages[mortgages.length-1]?.rate}% rate</span> : null}
-              </div>
-              {mortgages.length > 0 ? (
-                <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-                  <span style={{display:"flex",alignItems:"center",gap:6,fontSize:16,color:T.text1}}><span style={{width:18,height:3,background:T.gold,borderRadius:1,display:"inline-block"}}/>Balance</span>
-                  <span style={{display:"flex",alignItems:"center",gap:6,fontSize:16,color:T.text1}}><span style={{width:18,height:3,background:T.red,borderRadius:1,display:"inline-block"}}/>Interest owed</span>
-                  <span style={{display:"flex",alignItems:"center",gap:6,fontSize:16,color:T.text1}}><span style={{width:18,height:3,background:"#a78bfa",borderRadius:1,display:"inline-block"}}/>Market value</span>
-                  <span style={{display:"flex",alignItems:"center",gap:6,fontSize:16,color:T.text1}}><span style={{width:18,height:3,background:T.green,borderRadius:1,display:"inline-block"}}/>Equity</span>
-                </div>
-              ) : null}
+            <div style={{marginBottom:"0.6rem",textAlign:"center"}}>
+              <span style={{fontSize:13,color:"rgba(255,255,255,0.6)",letterSpacing:"0.04em",textTransform:"uppercase"}}>Home Ownership</span>
+              {mortgages.length > 0 && <span style={{marginLeft:8,fontSize:10,color:T.accent,background:T.accentDim,padding:"2px 7px",borderRadius:3}}>{mortgages[mortgages.length-1]?.rate}% rate</span>}
             </div>
+
             {mortgages.length === 0 ? (
-              <div style={{height:735,display:"flex",alignItems:"center",justifyContent:"center",color:T.text2,fontSize:12,letterSpacing:"0.06em",border:"1px dashed rgba(255,255,255,0.08)",borderRadius:8,flexDirection:"column",gap:8}}>
-                <span style={{fontSize:18}}>🏠</span>
-                <span>ADD A HOME PURCHASE IN THE TIMELINE</span>
+              <div style={{height:490,display:"flex",alignItems:"center",justifyContent:"center",border:"1px dashed rgba(255,255,255,0.08)",borderRadius:8,flexDirection:"column",gap:12}}>
+                <span style={{fontSize:32}}>🏠</span>
+                <div style={{textAlign:"center"}}>
+                  <div style={{fontSize:13,color:T.text1,fontWeight:600,marginBottom:4}}>No home added yet</div>
+                  <div style={{fontSize:11,color:T.text2,marginBottom:12}}>Click <strong style={{color:T.accent}}>+ Add Event</strong> on any year in the</div>
+                  <div style={{fontSize:11,color:T.text2}}>Financial Roadmap Table below to add</div>
+                  <div style={{fontSize:11,color:T.text2}}>a home purchase with rate &amp; term.</div>
+                </div>
               </div>
             ) : (
-              <ResponsiveContainer width="100%" height={735}>
-                <LineChart data={mortgageDataSliced}>
+              <ResponsiveContainer width="100%" height={490}>
+                <LineChart data={mortgageDataSliced} margin={{top:8,right:8,left:0,bottom:20}}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" vertical={true} horizontal={true}/>
-                  <XAxis dataKey="age" tick={xT} {...axP} interval={4}
+                  <XAxis dataKey="age" tick={xT} {...axP} interval={xInterval}
                     tickFormatter={v => v != null ? `${v}` : ""}
                     label={{value:"Age",position:"insideBottom",offset:-2,fill:T.text2,fontSize:12}}/>
                   <YAxis tickFormatter={fmtK} tick={yT} {...axP} width={86} tickCount={10}/>
                   <Tooltip content={<MortgageTip/>}/>
+                  <Customized component={InPlotLegend({items:[
+                    {color:T.gold,    label:"Balance"},
+                    {color:T.red,     label:"Interest owed"},
+                    {color:"#a78bfa", label:"Market value"},
+                    {color:T.green,   label:"Equity"},
+                  ]})}/>
                   <Line type="monotone" dataKey="balance" stroke={T.gold} strokeWidth={2}
                     dot={({cx,cy,payload})=>payload.isEvent?<circle key={cx} cx={cx} cy={cy} r={5} fill={T.gold} stroke={T.bg0} strokeWidth={2}/>:<g key={cx}/>}
                     activeDot={{r:7,fill:T.gold,stroke:T.bg0,strokeWidth:2}}/>
@@ -913,53 +959,58 @@ function SalaryPanel({ salaryState, setSalaryState }) {
           </div>
         </div>
 
-        {/* Age range slider — shared for both charts */}
-        {hasStart && chartData.length > 1 && (
-          <div style={{padding:"6px 4px 4px",display:"flex",alignItems:"center",gap:14}}>
-            <span style={{fontSize:11,color:T.text2,whiteSpace:"nowrap",flexShrink:0}}>
-              Age {minAgeLabel}
-            </span>
-            <input type="range" min={10} max={100} step={5} value={chartRange}
-              onChange={e=>setChartRange(+e.target.value)}
-              style={{flex:1,accentColor:T.accent,height:4,cursor:"pointer"}}/>
-            <span style={{fontSize:11,color:T.text2,whiteSpace:"nowrap",flexShrink:0}}>
-              Age {maxAgeLabel}
-            </span>
-            <span style={{fontSize:11,color:T.accent,background:T.accentDim,padding:"3px 10px",borderRadius:5,whiteSpace:"nowrap",flexShrink:0}}>
-              {chartRange}% range
-            </span>
-          </div>
-        )}
+        {/* Year outlook bubbles */}
+        {hasStart && chartData.length > 1 && (() => {
+          const maxYrs = startAge ? Math.ceil((70 - startAge) / 5) * 5 : 40;
+          const opts = [];
+          for (let y = 5; y <= maxYrs; y += 5) opts.push(y);
+          const currentYrs = Math.round(chartData.length * chartRange / 100);
+          return (
+            <div style={{padding:"4px 0",display:"flex",alignItems:"center",gap:5,flexWrap:"wrap"}}>
+              <span style={{fontSize:10,color:T.text2,marginRight:2,flexShrink:0}}>View:</span>
+              {opts.map(y => {
+                const pct = Math.round(y / chartData.length * 100);
+                const active = Math.abs(currentYrs - y) < 3;
+                return (
+                  <button key={y} onClick={()=>setChartRange(Math.min(100, Math.round(y/chartData.length*100)))}
+                    style={{padding:"3px 10px",fontSize:11,borderRadius:5,cursor:"pointer",
+                      border:`1px solid ${active?T.accent:T.border}`,
+                      background:active?T.accentDim:"transparent",
+                      color:active?T.accent:T.text2,transition:"all 0.12s"}}>
+                    {y}yr
+                  </button>
+                );
+              })}
+              <button onClick={()=>setChartRange(100)} style={{padding:"3px 10px",fontSize:11,borderRadius:5,cursor:"pointer",
+                border:`1px solid ${chartRange===100?T.gold:T.border}`,
+                background:chartRange===100?T.goldDim:"transparent",
+                color:chartRange===100?T.gold:T.text2,transition:"all 0.12s"}}>All</button>
+            </div>
+          );
+        })()}
 
       </div>
 
-      {/* Scrollable timeline - flex:1 works here because parent is position:absolute flex-column */}
-      <div style={{position:"relative",zIndex:1,flex:1,overflowY:"auto",padding:"0 2rem 2rem"}}>
-        <Card className="fu fu5" style={{padding:0}}>
-          {/* Invitation banner */}
-          <div style={{padding:"1.25rem 1.5rem",borderBottom:"1px solid rgba(255,255,255,0.08)",background:"linear-gradient(135deg,rgba(129,140,248,0.08),rgba(251,191,36,0.05))"}}>
-            <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:16}}>
-              <div>
-                <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:6}}>
-                  <span style={{fontSize:18}}>🗺️</span>
-                  <span style={{fontFamily:"'Syne',sans-serif",fontSize:16,fontWeight:700,color:T.text0,letterSpacing:"-0.02em"}}>Build Your Financial Roadmap</span>
-                </div>
-                <p style={{fontSize:12,color:"rgba(255,255,255,0.5)",lineHeight:1.6,maxWidth:560}}>
-                  Every great journey starts with a plan. Click the <strong style={{color:T.accent}}>+ Add Event</strong> button on any year below to record a promotion, job change, home purchase, 401k contribution, or investment. Your charts update instantly as you build out your future.
-                </p>
-                <div style={{display:"flex",gap:16,marginTop:10}}>
-                  {[["🏅","Promotions & raises"],["🏢","Job changes"],["🏠","Home purchases"],["💼","401k & investments"],["🎯","Life events"]].map(([icon,lbl])=>(
-                    <span key={lbl} style={{fontSize:11,color:"rgba(255,255,255,0.4)",display:"flex",alignItems:"center",gap:5}}>
-                      <span>{icon}</span>{lbl}
-                    </span>
-                  ))}
-                </div>
-              </div>
-              <span style={{fontSize:11,color:T.gold,background:T.goldDim,padding:"4px 12px",borderRadius:6,whiteSpace:"nowrap",flexShrink:0}}>+{rate}% / yr baseline</span>
-            </div>
+      {/* Scrollable timeline */}
+      <div style={{position:"relative",zIndex:1,flex:1,overflowY:"auto",padding:"0 2rem 0"}}>
+
+        {/* Sticky header — outside any overflow:hidden so it can actually stick */}
+        <div style={{
+          position:"sticky",top:0,zIndex:10,
+          background:"rgb(14,14,22)",
+          borderRadius:"12px 12px 0 0",
+          border:"1px solid rgba(255,255,255,0.1)",
+          borderBottom:"1px solid rgba(255,255,255,0.08)",
+          boxShadow:"0 4px 0 0 rgb(14,14,22)",
+        }}>
+          <div style={{padding:"7px 16px",borderBottom:"1px solid rgba(255,255,255,0.08)",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12}}>
+            <span style={{fontSize:12,color:"rgba(255,255,255,0.5)"}}>
+              🗺️ <strong style={{color:T.text0}}>Build your Financial Roadmap year by year</strong> — click <strong style={{color:T.accent}}>+ Add Event</strong> on any row below
+            </span>
+            <span style={{fontSize:11,color:T.gold,background:T.goldDim,padding:"3px 10px",borderRadius:5,whiteSpace:"nowrap",flexShrink:0}}>+{rate}% / yr baseline</span>
           </div>
           {/* Column headers */}
-          <div style={{display:"flex",alignItems:"center",borderBottom:"1px solid rgba(255,255,255,0.06)",background:"rgba(255,255,255,0.02)",justifyContent:"center"}}>
+          <div style={{display:"flex",alignItems:"center",borderBottom:"1px solid rgba(255,255,255,0.08)",background:"rgba(22,22,35,0.97)",justifyContent:"center"}}>
             <div style={{width:72,flexShrink:0,padding:"7px 0 7px 20px",fontSize:9,color:T.text2,letterSpacing:"0.1em",textTransform:"uppercase"}}>Year</div>
             <div style={{width:1,height:28,background:"rgba(255,255,255,0.06)",flexShrink:0}}/>
             {firstEntry?.startAge && <>
@@ -968,18 +1019,26 @@ function SalaryPanel({ salaryState, setSalaryState }) {
             </>}
             <div style={{width:120,flexShrink:0,padding:"7px 16px",fontSize:9,color:T.text2,letterSpacing:"0.1em",textTransform:"uppercase",textAlign:"right"}}>Salary</div>
             <div style={{width:1,height:28,background:"rgba(255,255,255,0.06)",flexShrink:0}}/>
-            <div style={{width:160,flexShrink:0,padding:"7px 16px",fontSize:9,color:T.text2,letterSpacing:"0.1em",textTransform:"uppercase"}}>Event / Role</div>
-            <div style={{width:1,height:28,background:"rgba(255,255,255,0.06)",flexShrink:0}}/>
             <div style={{width:130,flexShrink:0,padding:"7px 16px",fontSize:9,color:T.text2,letterSpacing:"0.1em",textTransform:"uppercase",textAlign:"right"}}>401k / yr</div>
             <div style={{width:1,height:28,background:"rgba(255,255,255,0.06)",flexShrink:0}}/>
             <div style={{width:160,flexShrink:0,padding:"7px 16px",fontSize:9,color:T.text2,letterSpacing:"0.1em",textTransform:"uppercase"}}>Home / Mortgage</div>
             <div style={{width:1,height:28,background:"rgba(255,255,255,0.06)",flexShrink:0}}/>
             <div style={{width:150,flexShrink:0,padding:"7px 16px",fontSize:9,color:T.text2,letterSpacing:"0.1em",textTransform:"uppercase"}}>Investments</div>
             <div style={{width:1,height:28,background:"rgba(255,255,255,0.06)",flexShrink:0}}/>
-            <div style={{width:190,flexShrink:0,padding:"7px 16px",fontSize:9,color:T.text2,letterSpacing:"0.1em",textTransform:"uppercase"}}>Life Events</div>
+            <div style={{width:190,flexShrink:0,padding:"7px 16px",fontSize:9,color:T.text2,letterSpacing:"0.1em",textTransform:"uppercase"}}>Other Events</div>
             <div style={{flex:1}}/>
           </div>
+        </div>{/* end sticky header */}
 
+        {/* Rows wrapper — rounded bottom, connects visually to sticky header above */}
+        <div style={{
+          border:"1px solid rgba(255,255,255,0.1)",
+          borderTop:"none",
+          borderRadius:"0 0 12px 12px",
+          overflow:"hidden",
+          marginBottom:"2rem",
+          background:"rgba(255,255,255,0.04)",
+        }}>
           <div style={{padding:"0.5rem 0"}}>
             {years.map(year => {
               const anchor = entries.find(e => e.year === year);
@@ -993,6 +1052,14 @@ function SalaryPanel({ salaryState, setSalaryState }) {
                 : (anchor && prevSal ? (anchor.salary - prevSal) / prevSal * 100 : null);
               const typeColor = anchor?.type === "jobchange" ? T.green : T.accent;
               const typeLabel = anchor?.type === "start" ? "START" : anchor?.type === "promotion" ? "PROMO" : anchor?.type === "jobchange" ? "NEW JOB" : null;
+              // True if ANY event has been logged for this year (not just salary)
+              const hasAnyEvent = !isFirst && (
+                !!anchor ||
+                contrib401k.some(e => e.year === year) ||
+                investments.some(e => e.year === year) ||
+                mortgages.some(m => m.year === year) ||
+                lifeEvents.some(e => e.year === year)
+              );
 
               return (
                 <div key={year}>
@@ -1007,20 +1074,22 @@ function SalaryPanel({ salaryState, setSalaryState }) {
                       display:"flex", alignItems:"center", gap:0,
                       padding:"0 0", cursor:"pointer",
                       borderBottom:"1px solid rgba(255,255,255,0.04)",
-                      background: isOpen ? "rgba(129,140,248,0.08)" : anchor ? "rgba(255,255,255,0.03)" : "transparent",
-                      transition:"background 0.1s",
+                      background: isOpen ? "rgba(129,140,248,0.1)" : activeYear && !isOpen ? "rgba(0,0,0,0.55)" : anchor ? "rgba(255,255,255,0.03)" : "transparent",
+                      opacity: activeYear && !isOpen ? 0.35 : 1,
+                      transition:"background 0.15s, opacity 0.15s",
+                      pointerEvents: activeYear && !isOpen ? "none" : "auto",
                     }}
-                    onMouseEnter={e=>{ if(!isOpen) e.currentTarget.style.background="rgba(255,255,255,0.04)"; }}
-                    onMouseLeave={e=>{ if(!isOpen) e.currentTarget.style.background= anchor ? "rgba(255,255,255,0.03)" : "transparent"; }}
+                    onMouseEnter={e=>{ if(!isOpen && !activeYear) e.currentTarget.style.background="rgba(255,255,255,0.04)"; }}
+                    onMouseLeave={e=>{ if(!isOpen && !activeYear) e.currentTarget.style.background= anchor ? "rgba(255,255,255,0.03)" : "transparent"; }}
                   >
                     {/* Year label + indicator */}
                     <div style={{width:72,flexShrink:0,padding:"12px 0 12px 20px",display:"flex",alignItems:"center",gap:8}}>
                       <div style={{
                         width:8, height:8, borderRadius:"50%", flexShrink:0,
-                        background: isFirst ? T.gold : anchor ? typeColor : T.border,
-                        boxShadow: (isFirst||anchor) ? `0 0 6px ${isFirst?T.gold:typeColor}88` : "none",
+                        background: (isFirst||isOpen||hasAnyEvent) ? T.gold : T.border,
+                        boxShadow: (isFirst||isOpen||hasAnyEvent) ? `0 0 6px ${T.gold}88` : "none",
                       }}/>
-                      <span style={{fontSize:12,fontWeight: (isFirst||anchor)?600:400, color: (isFirst||anchor)?T.text0:T.text2, fontFamily:"'Syne',sans-serif"}}>{year}</span>
+                      <span style={{fontSize:12,fontWeight:(isFirst||isOpen||hasAnyEvent)?600:400, color:(isFirst||isOpen||hasAnyEvent)?"#fff":T.text2, fontFamily:"'Syne',sans-serif"}}>{year}</span>
                     </div>
 
                     {/* Vertical line */}
@@ -1040,28 +1109,31 @@ function SalaryPanel({ salaryState, setSalaryState }) {
 
                     {/* Salary */}
                     <div style={{width:120,flexShrink:0,padding:"0 16px",textAlign:"right"}}>
-                      <span style={{fontSize:13,fontWeight:500,color: anchor ? "#fff" : T.text2, fontFamily:"'Syne',sans-serif"}}>
-                        {proj ? fmtK(proj) : "—"}
-                      </span>
+                      {(() => {
+                        const salChanged = anchor && anchor.type !== "start";
+                        const prevSalary = prevSal;
+                        const salArrow = salChanged && prevSalary && anchor.salary
+                          ? (anchor.salary > prevSalary ? "▲" : anchor.salary < prevSalary ? "▼" : null)
+                          : null;
+                        const salArrowCol = salArrow === "▲" ? T.green : T.red;
+                        return (
+                          <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:1}}>
+                            <div style={{display:"flex",alignItems:"center",gap:3}}>
+                              <span style={{fontSize:13,fontWeight:salChanged?600:500,color:salChanged?"#fff":anchor?T.text1:T.text2,fontFamily:"'Syne',sans-serif"}}>
+                                {proj ? fmtK(proj) : "—"}
+                              </span>
+                              {salArrow && <span style={{fontSize:10,color:salArrowCol}}>{salArrow}</span>}
+                            </div>
+                            {salChanged && anchor?.raisePct && (
+                              <span style={{fontSize:9,color:anchor.raisePct>=0?T.green:T.red}}>{anchor.raisePct>=0?"+":""}{anchor.raisePct.toFixed(1)}%</span>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </div>
 
                     {/* Vertical line */}
                     <div style={{width:1,height:44,background:"rgba(255,255,255,0.06)",flexShrink:0}}/>
-
-                    {/* Event badge / change */}
-                    <div style={{width:160,flexShrink:0,padding:"0 16px",display:"flex",alignItems:"center",gap:8,overflow:"hidden"}}>
-                      {typeLabel && (
-                        <span style={{fontSize:10,color:isFirst?T.gold:typeColor,background:isFirst?T.goldDim:typeColor+"22",padding:"3px 8px",borderRadius:4,letterSpacing:"0.08em",fontWeight:600,flexShrink:0}}>
-                          {typeLabel}
-                        </span>
-                      )}
-                      {anchor && <span style={{fontSize:12,color:T.text1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{anchor.role}{anchor.company ? ` · ${anchor.company}` : ""}</span>}
-                      {anchorChange !== null && !typeLabel && (
-                        <span style={{fontSize:11,color:anchorChange>=0?T.green:T.red,background:anchorChange>=0?T.greenDim:T.redDim,padding:"2px 7px",borderRadius:4,flexShrink:0}}>
-                          {anchorChange>=0?"+":""}{anchorChange.toFixed(1)}%
-                        </span>
-                      )}
-                    </div>
 
                     {/* 401k column */}
                     <div style={{width:1,height:44,background:"rgba(255,255,255,0.06)",flexShrink:0}}/>
@@ -1074,13 +1146,19 @@ function SalaryPanel({ salaryState, setSalaryState }) {
                           ? proj * Math.min(pct, match401k.upToPct) / 100 * match401k.matchPct / 100 : 0;
                         const total = myAmt + matchAmt;
                         const isNew401k = contrib401k.some(c => c.year === year);
+                        // Compare to previous year's pct
+                        const prevC = [...contrib401k].reverse().find(c => c.year < year);
+                        const prevPct = prevC ? prevC.pct : 0;
+                        const changed = isNew401k && pct !== prevPct;
+                        const arrow = changed ? (pct > prevPct ? "▲" : "▼") : null;
+                        const arrowColor = pct > prevPct ? T.green : T.red;
                         return pct > 0 ? (
                           <div>
-                            <div style={{fontSize:12,color:isNew401k?T.green:T.text1,fontWeight:isNew401k?600:400}}>
-                              {fmtK(total)}
-                              {matchAmt > 0 && <span style={{fontSize:9,color:T.green,marginLeft:4}}>+match</span>}
+                            <div style={{fontSize:12,color:changed?"#fff":T.text2,fontWeight:changed?600:400,display:"flex",alignItems:"center",gap:4}}>
+                              {pct}% {matchAmt>0?<span style={{fontSize:9,color:changed?T.green:T.text2}}>+match</span>:null}
+                              {arrow && <span style={{fontSize:9,color:arrowColor}}>{arrow}</span>}
                             </div>
-                            <div style={{fontSize:10,color:T.text2}}>{pct}% {matchAmt>0?`+${match401k.matchPct}% match`:""}</div>
+                            <div style={{fontSize:10,color:T.text2}}>{changed?fmtK(total):`${fmtK(total)}`}</div>
                           </div>
                         ) : <span style={{fontSize:12,color:T.text2}}>—</span>;
                       })()}
@@ -1119,17 +1197,23 @@ function SalaryPanel({ salaryState, setSalaryState }) {
                         const isNew = investments.some(i => i.year === year);
                         if (!inv) return <span style={{fontSize:12,color:T.text2}}>—</span>;
                         const snap = chartData.find(d => d.year === year);
+                        const prevInv = [...investments].reverse().find(i => i.year < year);
+                        const prevPct = prevInv ? prevInv.pct : 0;
+                        const changed = isNew && inv.pct !== prevPct;
+                        const arrow = changed ? (inv.pct > prevPct ? "▲" : "▼") : null;
+                        const arrowCol = inv.pct > prevPct ? T.green : T.red;
                         return (
                           <div>
-                            <div style={{fontSize:11,color:isNew?T.gold:T.text1,fontWeight:isNew?600:400}}>
-                              {snap ? fmtK(snap.investBalance) : "—"}
+                            <div style={{fontSize:11,color:changed?"#fff":T.text2,fontWeight:changed?600:400,display:"flex",alignItems:"center",gap:4}}>
+                              {inv.pct}% of salary
+                              {arrow && <span style={{fontSize:9,color:arrowCol}}>{arrow}</span>}
                             </div>
-                            <div style={{fontSize:10,color:T.text2}}>{inv.ticker} · {inv.pct}% of salary</div>
+                            <div style={{fontSize:10,color:T.text2}}>{snap ? fmtK(snap.investBalance) : "—"}</div>
                           </div>
                         );
                       })()}
                     </div>
-                    {/* Life Events column */}
+                    {/* Other Events column */}
                     <div style={{width:1,height:44,background:"rgba(255,255,255,0.06)",flexShrink:0}}/>
                     <div style={{width:190,flexShrink:0,padding:"0 16px"}}>
                       {(() => {
@@ -1173,14 +1257,14 @@ function SalaryPanel({ salaryState, setSalaryState }) {
                           fontFamily:"'Syne',sans-serif", letterSpacing:"-0.01em",
                         }}>−</span>
                       ) : (
-                        <span className={anchor ? "" : "pulse-add"} style={{
+                        <span className={hasAnyEvent ? "" : "pulse-add"} style={{
                           fontSize:12, fontWeight:700, color:"#fff",
-                          background: anchor ? "rgba(129,140,248,0.25)" : T.accent,
-                          border:`1px solid ${T.accent}`,
+                          background: hasAnyEvent ? "rgba(255,255,255,0.1)" : T.accent,
+                          border:`1px solid ${hasAnyEvent ? "rgba(255,255,255,0.2)" : T.accent}`,
                           borderRadius:6, padding:"4px 10px", transition:"background 0.2s",
                           fontFamily:"'Syne',sans-serif", letterSpacing:"0.02em",
                           whiteSpace:"nowrap",
-                        }}>+ Add Event</span>
+                        }}>{hasAnyEvent ? "✏️ Edit" : "+ Add Event"}</span>
                       )}
                     </div>
                   </div>
@@ -1190,368 +1274,110 @@ function SalaryPanel({ salaryState, setSalaryState }) {
                     <div style={{
                       background:"rgba(129,140,248,0.06)",
                       borderBottom:"1px solid rgba(129,140,248,0.2)",
-                      padding:"16px 20px 20px",
+                      padding:"6px 16px 10px 24px",
+                      display:"flex",flexDirection:"column",gap:5,
                     }}>
-                      {/* Pre-filled projected salary callout — hidden on start year */}
-                      {!isFirst && <div style={{fontSize:12,color:T.text1,marginBottom:14,padding:"8px 12px",background:"rgba(255,255,255,0.04)",borderRadius:6,borderLeft:`3px solid ${T.gold}`}}>
-                        Projected salary entering {year} at {rate}% annual raises:
-                        <span style={{color:T.gold,fontWeight:600,marginLeft:8,fontFamily:"'Syne',sans-serif"}}>{fmt(proj)}</span>
-                      </div>}
+                      {/* Year header */}
+                      <div style={{fontSize:10,color:T.gold,fontWeight:700,letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:2,paddingLeft:0}}>
+                        {year}{startAge ? ` · Age ${startAge+(year-startYear)}` : ""} {proj ? `· ${fmt(proj)}/yr` : ""}
+                      </div>
+                      {/* ── 401k row ── */}
+                      {(() => {
+                        const cur401k = [...contrib401k].reverse().find(c=>c.year<=year);
+                        const curPct = cur401k?cur401k.pct:0;
+                        const sel = eventForm.k401Pct!==null?eventForm.k401Pct:curPct;
+                        return (
+                          <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                            <span style={{fontSize:11,color:"#fff",fontWeight:600,flexShrink:0,width:96}}>💼 401k{curPct>0?` (${curPct}%)`:""}</span>
+                            {[0,1,2,3,4,5,6,7,8,9,10,12,15].map(p=>{
+                              const on=sel===p;
+                              return <button key={p} onClick={()=>setEventForm(f=>({...f,k401Pct:p}))} style={{padding:"3px 8px",fontSize:11,borderRadius:4,border:`1px solid ${on?(p===0?T.red:T.green):T.border}`,background:on?(p===0?T.redDim:T.greenDim):"transparent",color:on?(p===0?T.red:T.green):T.text2,cursor:"pointer"}}>{p===0?"None":`${p}%`}</button>;
+                            })}
+                            {/* Switch-style employer match toggle */}
+                            <div style={{display:"flex",alignItems:"center",gap:5,marginLeft:8,flexShrink:0}}>
+                              <button onClick={()=>setMatch401k(m=>({...m,enabled:!m.enabled}))} style={{
+                                width:32,height:17,borderRadius:9,border:"none",cursor:"pointer",flexShrink:0,
+                                background:match401k.enabled?T.green:"rgba(255,255,255,0.15)",
+                                position:"relative",transition:"background 0.2s",padding:0,
+                              }}>
+                                <span style={{position:"absolute",top:2,left:match401k.enabled?17:2,width:13,height:13,borderRadius:"50%",background:"#fff",transition:"left 0.2s",display:"block"}}/>
+                              </button>
+                              <span style={{fontSize:10,color:match401k.enabled?T.green:T.text2,whiteSpace:"nowrap"}}>Match</span>
+                            </div>
+                            {match401k.enabled && [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15].map(p=>{const on=match401k.upToPct===p;return <button key={p} onClick={()=>setMatch401k(m=>({...m,upToPct:p}))} style={{padding:"3px 6px",fontSize:10,borderRadius:4,border:`1px solid ${on?T.green:T.border}`,background:on?T.greenDim:"transparent",color:on?T.green:T.text2,cursor:"pointer"}}>{p}%</button>;})}
+                          </div>
+                        );
+                      })()}
 
-                      {/* Promotion or Job Change toggle — hidden on start year */}
-                      {!isFirst && <div style={{display:"flex",gap:8,marginBottom:14}}>
-                        {[["promotion","🏅 Promotion"],["jobchange","🏢 Job Change"]].map(([val,lbl])=>{
-                          const on = eventForm.type===val;
-                          return (
-                            <button key={val} onClick={()=>setEventForm(f=>({...f,type:val}))} style={{
-                              flex:1,padding:"10px",fontSize:12,borderRadius:8,
-                              border:`1px solid ${on?(val==="promotion"?T.accent:T.green):T.border}`,
-                              background:on?(val==="promotion"?T.accentDim:T.greenDim):"transparent",
-                              color:on?(val==="promotion"?T.accent:T.green):T.text2,
-                              cursor:"pointer",transition:"all 0.15s",
-                            }}>{lbl}</button>
-                          );
+                      {/* ── Investments row ── */}
+                      {(() => {
+                        const curInv=[...investments].reverse().find(i=>i.year<=year);
+                        const curPctInv=curInv?curInv.pct:0;
+                        const sel=eventForm.investPct!==null?eventForm.investPct:curPctInv;
+                        return (
+                          <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                            <span style={{fontSize:11,color:"#fff",fontWeight:600,flexShrink:0,width:96}}>📈 Invest{curPctInv>0?` (${curPctInv}%)`:""}</span>
+                            {[0,1,2,3,4,5,6,7,8,9,10,12,15].map(p=>{
+                              const on=sel===p;
+                              return <button key={p} onClick={()=>setEventForm(f=>({...f,investPct:p}))} style={{padding:"3px 8px",fontSize:11,borderRadius:4,border:`1px solid ${on?(p===0?T.red:T.gold):T.border}`,background:on?(p===0?T.redDim:T.goldDim):"transparent",color:on?(p===0?T.red:T.gold):T.text2,cursor:"pointer"}}>{p===0?"None":`${p}%`}</button>;
+                            })}
+                            <span style={{fontSize:10,color:"rgba(255,255,255,0.2)",flexShrink:0,margin:"0 2px"}}>|</span>
+                            <span style={{fontSize:10,color:T.text2,flexShrink:0}}>Return:</span>
+                            {[5,6,7,8,9,10,11,12,13,14,15].map(r=>{
+                              const on=(eventForm.investReturn||7)===r;
+                              return <button key={r} onClick={()=>setEventForm(f=>({...f,investReturn:r}))} style={{padding:"3px 6px",fontSize:10,borderRadius:4,border:`1px solid ${on?T.gold:T.border}`,background:on?T.goldDim:"transparent",color:on?T.gold:T.text2,cursor:"pointer"}}>{r}%</button>;
+                            })}
+                          </div>
+                        );
+                      })()}
+
+                      {/* ── Home purchase row ── */}
+                      {(() => {
+                        const em=mortgages.find(m=>m.year===year);
+                        const price=parseFloat(eventForm.homePrice);
+                        const rate2=parseFloat(eventForm.mortgageRate);
+                        let preview=null;
+                        if(price>0&&rate2>0){const dpv=eventForm.downPct!==''&&!isNaN(parseFloat(eventForm.downPct))?parseFloat(eventForm.downPct):20;const loan=price*(1-dpv/100);const mr=rate2/100/12;const n=eventForm.mortgageTerm*12;const pmt=mr===0?loan/n:loan*mr*Math.pow(1+mr,n)/(Math.pow(1+mr,n)-1);preview=<span style={{fontSize:11,color:T.accent}}>Loan {fmtK(loan)} · {fmt(pmt)}/mo</span>;}
+                        return (
+                          <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                            <span style={{fontSize:11,color:"#fff",fontWeight:600,flexShrink:0,width:96}}>🏠 Home{em?` (${fmtK(em.price)})`:""}</span>
+                            <input type="number" placeholder="Home price e.g. 450000" value={eventForm.homePrice} onChange={e=>setEventForm(f=>({...f,homePrice:e.target.value}))} style={{width:180}}/>
+                            <input type="number" placeholder="% Down e.g. 20" value={eventForm.downPct} onChange={e=>setEventForm(f=>({...f,downPct:e.target.value}))} style={{width:120}}/>
+                            <input type="number" placeholder="Interest rate e.g. 6.5" step="0.1" value={eventForm.mortgageRate} onChange={e=>setEventForm(f=>({...f,mortgageRate:e.target.value}))} style={{width:150}}/>
+                            {[15,30].map(t=>{const on=eventForm.mortgageTerm===t;return <button key={t} onClick={()=>setEventForm(f=>({...f,mortgageTerm:t}))} style={{padding:"3px 8px",fontSize:10,borderRadius:4,border:`1px solid ${on?T.accent:T.border}`,background:on?T.accentDim:"transparent",color:on?T.accent:T.text2,cursor:"pointer"}}>{t}yr</button>;})}
+                            {preview}
+                            {em&&!eventForm.homePrice&&<button onClick={()=>setMortgages(p=>p.filter(m=>m.year!==year))} style={{fontSize:10,color:T.red,background:"transparent",border:`1px solid ${T.red}`,borderRadius:4,padding:"2px 6px",cursor:"pointer"}}>Remove</button>}
+                            {/* Selling prev home */}
+                            {price>0&&mortgages.some(m=>m.year<year)&&(()=>{
+                              const snap=mortgageData.find(d=>d.year===year);
+                              const eq=snap?snap.equity:0;
+                              const invSnap=chartData.find(d=>d.year===year);
+                              const iv=invSnap?invSnap.investBalance:0;
+                              return <span style={{fontSize:10,color:"#a78bfa",flexShrink:0}}>
+                                🏡 Equity {fmtK(eq)}
+                                <label style={{marginLeft:6,cursor:"pointer"}}><input type="checkbox" checked={eventForm.useEquity} onChange={e=>setEventForm(f=>({...f,useEquity:e.target.checked}))} style={{accentColor:T.green,marginRight:3}}/>use</label>
+                                {iv>0&&<label style={{marginLeft:6,cursor:"pointer"}}><input type="checkbox" checked={eventForm.useInvestments} onChange={e=>setEventForm(f=>({...f,useInvestments:e.target.checked}))} style={{accentColor:T.gold,marginRight:3}}/>invest {fmtK(iv)}</label>}
+                              </span>;
+                            })()}
+                          </div>
+                        );
+                      })()}
+
+                      {/* ── Life event row ── */}
+                      <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                        <span style={{fontSize:11,color:"#fff",fontWeight:600,flexShrink:0,width:96}}>🎯 Life event</span>
+                        {[["expense","💸",T.red,"Big Expense"],["extra-mortgage","🏠",T.accent,"Extra Mortgage"],["extra-invest","📈",T.gold,"Extra Investment"]].map(([val,icon,col,lbl])=>{
+                          const on=eventForm.lifeType===val;
+                          return <button key={val} onClick={()=>setEventForm(f=>({...f,lifeType:val}))} title={lbl} style={{padding:"3px 8px",fontSize:11,borderRadius:4,border:`1px solid ${on?col:T.border}`,background:on?col+"22":"transparent",color:on?col:T.text2,cursor:"pointer"}}>{icon} {on?lbl:""}</button>;
                         })}
-                      </div>}
-
-                      {!isFirst && (eventForm.type === "promotion" ? (
-                        <div style={{display:"grid",gridTemplateColumns:"1fr 2fr",gap:10,marginBottom:12}}>
-                          <div>
-                            <div style={{fontSize:10,color:"rgba(255,255,255,0.35)",marginBottom:5,letterSpacing:"0.08em"}}>RAISE %</div>
-                            <input type="number" placeholder="10" value={eventForm.pct}
-                              onChange={e=>setEventForm(f=>({...f,pct:e.target.value}))}
-                              onKeyDown={e=>e.key==="Enter"&&commitEvent()}/>
-                          </div>
-                          <div>
-                            <div style={{fontSize:10,color:"rgba(255,255,255,0.35)",marginBottom:5,letterSpacing:"0.08em"}}>NEW TITLE</div>
-                            <input type="text" placeholder="Senior Engineer" value={eventForm.role}
-                              onChange={e=>setEventForm(f=>({...f,role:e.target.value}))}
-                              onKeyDown={e=>e.key==="Enter"&&commitEvent()}/>
-                          </div>
-                          {eventForm.pct && !isNaN(parseFloat(eventForm.pct)) && proj && (
-                            <div style={{gridColumn:"1/-1",fontSize:12,color:T.green,padding:"8px 12px",background:T.greenDim,borderRadius:6}}>
-                              New salary: <strong>{fmt(proj * (1 + parseFloat(eventForm.pct)/100))}</strong>
-                              <span style={{color:T.text1,marginLeft:8}}>({eventForm.pct}% raise on {fmt(proj)})</span>
-                            </div>
-                          )}
-                        </div>
-                      ) : (
-                        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:12}}>
-                          <div>
-                            <div style={{fontSize:10,color:"rgba(255,255,255,0.35)",marginBottom:5,letterSpacing:"0.08em"}}>NEW SALARY ($)</div>
-                            <input type="number" placeholder={String(Math.round(proj||0))} value={eventForm.salary}
-                              onChange={e=>setEventForm(f=>({...f,salary:e.target.value}))}
-                              onKeyDown={e=>e.key==="Enter"&&commitEvent()}/>
-                          </div>
-                          <div>
-                            <div style={{fontSize:10,color:"rgba(255,255,255,0.35)",marginBottom:5,letterSpacing:"0.08em"}}>NEW ROLE</div>
-                            <input type="text" placeholder="Staff Engineer" value={eventForm.role}
-                              onChange={e=>setEventForm(f=>({...f,role:e.target.value}))}
-                              onKeyDown={e=>e.key==="Enter"&&commitEvent()}/>
-                          </div>
-                          <div>
-                            <div style={{fontSize:10,color:"rgba(255,255,255,0.35)",marginBottom:5,letterSpacing:"0.08em"}}>NEW COMPANY</div>
-                            <input type="text" placeholder="New Corp" value={eventForm.company}
-                              onChange={e=>setEventForm(f=>({...f,company:e.target.value}))}
-                              onKeyDown={e=>e.key==="Enter"&&commitEvent()}/>
-                          </div>
-                        </div>
-                      ))}
-
-                      {/* 401k section */}
-                      {(() => {
-                        const cur401k = [...contrib401k].reverse().find(c => c.year <= year);
-                        const curPct = cur401k ? cur401k.pct : 0;
-                        return (
-                          <div style={{marginTop:14,paddingTop:14,borderTop:`1px solid rgba(255,255,255,0.08)`}}>
-                            <div style={{fontSize:10,color:"rgba(255,255,255,0.4)",letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:10}}>
-                              💼 401k Contribution
-                              {curPct > 0 && <span style={{color:T.text2,fontWeight:400,marginLeft:8,textTransform:"none",letterSpacing:0}}>currently {curPct}%</span>}
-                            </div>
-                            <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-                              {[0,1,2,3,4,5,6,7,8,9,10,12,15].map(pct => {
-                                const selected = eventForm.k401Pct !== null ? eventForm.k401Pct : curPct;
-                                const on = selected === pct;
-                                const isZero = pct === 0;
-                                return (
-                                  <button key={pct} onClick={() => setEventForm(f=>({...f, k401Pct: pct}))} style={{
-                                    padding:"8px 14px", fontSize:12, borderRadius:6, cursor:"pointer",
-                                    border:`1px solid ${on ? (isZero ? T.red : T.green) : T.border}`,
-                                    background: on ? (isZero ? T.redDim : T.greenDim) : "transparent",
-                                    color: on ? (isZero ? T.red : T.green) : T.text2,
-                                    transition:"all 0.12s",
-                                  }}>{pct === 0 ? "None" : `${pct}%`}</button>
-                                );
-                              })}
-                            </div>
-                            {proj > 0 && (() => {
-                              const activePct = eventForm.k401Pct !== null ? eventForm.k401Pct : curPct;
-                              const myAmt = proj * activePct / 100;
-                              const matchAmt = (match401k.enabled && activePct > 0)
-                                ? proj * Math.min(activePct, match401k.upToPct) / 100 * match401k.matchPct / 100
-                                : 0;
-                              return activePct > 0 ? (
-                                <div style={{marginTop:10,fontSize:12,color:T.green,padding:"10px 12px",background:T.greenDim,borderRadius:6}}>
-                                  <div>You contribute: <strong>{fmtK(myAmt)}</strong> / yr ({activePct}% of {fmtK(proj)})</div>
-                                  {matchAmt > 0 && <div style={{color:"#86efac",marginTop:3}}>Employer match: <strong>+{fmtK(matchAmt)}</strong> / yr → Total: <strong>{fmtK(myAmt+matchAmt)}</strong></div>}
-                                </div>
-                              ) : null;
-                            })()}
-
-                            {/* Company match settings */}
-                            <div style={{marginTop:12,paddingTop:12,borderTop:`1px solid rgba(255,255,255,0.06)`}}>
-                              <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
-                                <button onClick={()=>setMatch401k(m=>({...m,enabled:!m.enabled}))} style={{
-                                  width:36,height:20,borderRadius:10,border:"none",cursor:"pointer",
-                                  background:match401k.enabled?T.green:T.border,
-                                  position:"relative",transition:"background 0.2s",flexShrink:0,
-                                }}>
-                                  <span style={{
-                                    position:"absolute",top:2,left:match401k.enabled?18:2,
-                                    width:16,height:16,borderRadius:"50%",background:"#fff",
-                                    transition:"left 0.2s",
-                                  }}/>
-                                </button>
-                                <span style={{fontSize:12,color:match401k.enabled?T.text0:T.text2}}>Employer match</span>
-                              </div>
-                              {match401k.enabled && (
-                                <div>
-                                  <div style={{fontSize:10,color:"rgba(255,255,255,0.35)",marginBottom:6,letterSpacing:"0.08em"}}>EMPLOYER MATCHES UP TO % OF YOUR SALARY</div>
-                                  <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
-                                    {[1,2,3,4,5,6,7,8,9,10].map(p=>{
-                                      const on = match401k.upToPct===p;
-                                      return <button key={p} onClick={()=>setMatch401k(m=>({...m,upToPct:p}))} style={{
-                                        padding:"7px 13px",fontSize:12,borderRadius:6,cursor:"pointer",
-                                        border:`1px solid ${on?T.green:T.border}`,
-                                        background:on?T.greenDim:"transparent",
-                                        color:on?T.green:T.text2,transition:"all 0.12s",
-                                      }}>{p}%</button>;
-                                    })}
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })()}
-
-                      {/* Investments section */}
-                      {(() => {
-                        const curInv = [...investments].reverse().find(i => i.year <= year);
-                        const curPctInv = curInv ? curInv.pct : 0;
-                        const selectedPct = eventForm.investPct !== null ? eventForm.investPct : curPctInv;
-                        return (
-                          <div style={{marginTop:14,paddingTop:14,borderTop:`1px solid rgba(255,255,255,0.08)`}}>
-                            <div style={{fontSize:10,color:"rgba(255,255,255,0.4)",letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:10}}>
-                              📈 Annual Investments
-                              {curPctInv > 0 && <span style={{color:T.text2,fontWeight:400,marginLeft:8,textTransform:"none",letterSpacing:0}}>currently {curPctInv}%</span>}
-                            </div>
-                            <div style={{marginBottom:8}}>
-                              <div style={{fontSize:10,color:"rgba(255,255,255,0.35)",marginBottom:5,letterSpacing:"0.08em"}}>TICKER (e.g. VOO)</div>
-                              <input type="text" placeholder="VOO" value={eventForm.investTicker}
-                                onChange={e=>setEventForm(f=>({...f,investTicker:e.target.value.toUpperCase()}))}
-                                style={{maxWidth:120}}/>
-                            </div>
-                            <div style={{fontSize:10,color:"rgba(255,255,255,0.35)",marginBottom:6,letterSpacing:"0.08em"}}>% OF SALARY TO INVEST</div>
-                            <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-                              {[0,1,2,3,4,5,6,7,8,9,10,12,15].map(pct => {
-                                const on = selectedPct === pct;
-                                const isZero = pct === 0;
-                                return (
-                                  <button key={pct} onClick={()=>setEventForm(f=>({...f,investPct:pct}))} style={{
-                                    padding:"8px 14px",fontSize:12,borderRadius:6,cursor:"pointer",
-                                    border:`1px solid ${on?(isZero?T.red:T.gold):T.border}`,
-                                    background:on?(isZero?T.redDim:T.goldDim):"transparent",
-                                    color:on?(isZero?T.red:T.gold):T.text2,
-                                    transition:"all 0.12s",
-                                  }}>{pct===0?"None":`${pct}%`}</button>
-                                );
-                              })}
-                            </div>
-                            {proj > 0 && selectedPct > 0 && (() => {
-                              const annualAmt = proj * selectedPct / 100;
-                              const snap = chartData.find(d => d.year === year);
-                              return (
-                                <div style={{marginTop:10,fontSize:12,color:T.gold,padding:"10px 12px",background:T.goldDim,borderRadius:6}}>
-                                  <div>Investing: <strong>{fmtK(annualAmt)}</strong>/yr ({selectedPct}% of {fmtK(proj)}) into {eventForm.investTicker||"VOO"} · 7% growth</div>
-                                  {snap && snap.investBalance > 0 && <div style={{color:T.text1,marginTop:3}}>Projected balance this year: <strong style={{color:T.gold}}>{fmtK(snap.investBalance)}</strong></div>}
-                                </div>
-                              );
-                            })()}
-                          </div>
-                        );
-                      })()}
-
-                      {/* Home purchase section */}
-                      {(() => {
-                        const existingMortgage = mortgages.find(m => m.year === year);
-                        return (
-                          <div style={{marginTop:14,paddingTop:14,borderTop:`1px solid rgba(255,255,255,0.08)`}}>
-                            <div style={{fontSize:10,color:"rgba(255,255,255,0.4)",letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:10}}>🏠 Home Purchase</div>
-                            <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr",gap:10,marginBottom:10}}>
-                              <div>
-                                <div style={{fontSize:10,color:"rgba(255,255,255,0.35)",marginBottom:5,letterSpacing:"0.08em"}}>HOME PRICE ($)</div>
-                                <input type="number" placeholder={existingMortgage?String(existingMortgage.price):"400000"} value={eventForm.homePrice}
-                                  onChange={e=>setEventForm(f=>({...f,homePrice:e.target.value}))}/>
-                              </div>
-                              <div>
-                                <div style={{fontSize:10,color:"rgba(255,255,255,0.35)",marginBottom:5,letterSpacing:"0.08em"}}>DOWN %</div>
-                                <input type="number" placeholder="20" value={eventForm.downPct}
-                                  onChange={e=>setEventForm(f=>({...f,downPct:e.target.value}))}/>
-                              </div>
-                              <div>
-                                <div style={{fontSize:10,color:"rgba(255,255,255,0.35)",marginBottom:5,letterSpacing:"0.08em"}}>RATE %</div>
-                                <input type="number" placeholder={existingMortgage?String(existingMortgage.rate):"6.5"} step="0.1" value={eventForm.mortgageRate}
-                                  onChange={e=>setEventForm(f=>({...f,mortgageRate:e.target.value}))}/>
-                              </div>
-                              <div>
-                                <div style={{fontSize:10,color:"rgba(255,255,255,0.35)",marginBottom:5,letterSpacing:"0.08em"}}>TERM</div>
-                                <div style={{display:"flex",gap:4}}>
-                                  {[15,30].map(t=>{
-                                    const on = eventForm.mortgageTerm===t;
-                                    return <button key={t} onClick={()=>setEventForm(f=>({...f,mortgageTerm:t}))} style={{
-                                      flex:1,padding:"8px 0",fontSize:11,borderRadius:5,cursor:"pointer",
-                                      border:`1px solid ${on?T.accent:T.border}`,
-                                      background:on?T.accentDim:"transparent",
-                                      color:on?T.accent:T.text2,transition:"all 0.12s",
-                                    }}>{t}yr</button>;
-                                  })}
-                                </div>
-                              </div>
-                            </div>
-                            {eventForm.homePrice && eventForm.mortgageRate && parseFloat(eventForm.homePrice)>0 && parseFloat(eventForm.mortgageRate)>0 && (() => {
-                              const price = parseFloat(eventForm.homePrice);
-                              const downPctVal = eventForm.downPct !== '' && !isNaN(parseFloat(eventForm.downPct)) ? parseFloat(eventForm.downPct) : 20;
-                              const down = price * downPctVal / 100;
-                              const loan = price - down;
-                              const mr = parseFloat(eventForm.mortgageRate)/100/12;
-                              const n = eventForm.mortgageTerm * 12;
-                              const pmt = mr===0 ? loan/n : loan*mr*Math.pow(1+mr,n)/(Math.pow(1+mr,n)-1);
-                              const totalPaid = pmt * n;
-                              return (
-                                <div style={{fontSize:12,color:T.accent,padding:"10px 12px",background:T.accentDim,borderRadius:6}}>
-                                  <div>Loan: <strong>{fmt(loan)}</strong> · Down: <strong>{fmt(down)}</strong></div>
-                                  <div style={{color:T.text1,marginTop:3}}>Monthly payment: <strong style={{color:T.accent}}>{fmt(pmt)}</strong> · Total interest: <strong style={{color:T.red}}>{fmt(totalPaid-loan)}</strong></div>
-                                </div>
-                              );
-                            })()}
-                            {existingMortgage && !eventForm.homePrice && (
-                              <div style={{fontSize:11,color:T.text2,padding:"6px 10px",background:"rgba(255,255,255,0.03)",borderRadius:5}}>
-                                Current: {fmtK(existingMortgage.price)} at {existingMortgage.rate}% — leave blank to keep unchanged
-                                <button onClick={()=>setMortgages(p=>p.filter(m=>m.year!==year))} style={{marginLeft:12,fontSize:10,color:T.red,background:"transparent",border:`1px solid ${T.red}`,borderRadius:4,padding:"2px 7px",cursor:"pointer"}}>Remove</button>
-                              </div>
-                            )}
-                            {/* Selling first home to buy new one — show equity/investment options */}
-                            {eventForm.homePrice && parseFloat(eventForm.homePrice)>0 && mortgages.some(m=>m.year<year) && (() => {
-                              const prevMort = [...mortgages].reverse().find(m=>m.year<year);
-                              const snap = prevMort ? mortgageData.find(d=>d.year===year) : null;
-                              const availEquity = snap ? snap.equity : 0;
-                              const invSnap = chartData.find(d=>d.year===year);
-                              const availInvest = invSnap ? invSnap.investBalance : 0;
-                              if (!prevMort) return null;
-                              return (
-                                <div style={{marginTop:10,padding:"12px",background:"rgba(167,139,250,0.08)",borderRadius:8,border:"1px solid rgba(167,139,250,0.2)"}}>
-                                  <div style={{fontSize:11,color:"#a78bfa",fontWeight:600,marginBottom:8}}>🏡 Selling previous home?</div>
-                                  <div style={{fontSize:11,color:T.text1,marginBottom:10}}>
-                                    Est. equity from prior home in {year}: <strong style={{color:T.green}}>{fmt(availEquity)}</strong>
-                                    {availInvest>0 && <span style={{marginLeft:10}}>Investment portfolio: <strong style={{color:T.gold}}>{fmt(availInvest)}</strong></span>}
-                                  </div>
-                                  <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                                    <label style={{display:"flex",alignItems:"center",gap:6,fontSize:11,color:T.text1,cursor:"pointer"}}>
-                                      <input type="checkbox" checked={eventForm.useEquity} onChange={e=>setEventForm(f=>({...f,useEquity:e.target.checked}))} style={{accentColor:T.green}}/>
-                                      Apply home equity ({fmtK(availEquity)}) to down payment
-                                    </label>
-                                    {availInvest>0 && (
-                                      <label style={{display:"flex",alignItems:"center",gap:6,fontSize:11,color:T.text1,cursor:"pointer"}}>
-                                        <input type="checkbox" checked={eventForm.useInvestments} onChange={e=>setEventForm(f=>({...f,useInvestments:e.target.checked}))} style={{accentColor:T.gold}}/>
-                                        Use investments ({fmtK(availInvest)}) for down payment
-                                      </label>
-                                    )}
-                                  </div>
-                                  {(eventForm.useEquity || eventForm.useInvestments) && (() => {
-                                    const price2 = parseFloat(eventForm.homePrice);
-                                    const extra = (eventForm.useEquity?availEquity:0)+(eventForm.useInvestments?availInvest:0);
-                                    const downPctVal2 = eventForm.downPct!==''&&!isNaN(parseFloat(eventForm.downPct))?parseFloat(eventForm.downPct):20;
-                                    const baseDown = price2*downPctVal2/100;
-                                    const totalDown = Math.min(price2, baseDown+extra);
-                                    const newLoan = Math.max(0, price2-totalDown);
-                                    return (
-                                      <div style={{marginTop:8,fontSize:12,color:T.green,padding:"8px 10px",background:T.greenDim,borderRadius:6}}>
-                                        Total down: {fmt(totalDown)} ({((totalDown/price2)*100).toFixed(1)}%) · New loan: {fmt(newLoan)}
-                                      </div>
-                                    );
-                                  })()}
-                                </div>
-                              );
-                            })()}
-                          </div>
-                        );
-                      })()}
-
-                      {/* Life Events section */}
-                      <div style={{marginTop:14,paddingTop:14,borderTop:`1px solid rgba(255,255,255,0.08)`}}>
-                        <div style={{fontSize:10,color:"rgba(255,255,255,0.4)",letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:10}}>
-                          🎯 Life Event
-                        </div>
-                        {/* Type selector */}
-                        <div style={{display:"flex",gap:6,marginBottom:10}}>
-                          {[
-                            ["expense",       "💸 Big Expense",      T.red,    T.redDim],
-                            ["extra-mortgage","🏠 Extra Mortgage",   T.accent, T.accentDim],
-                            ["extra-invest",  "📈 Extra Investment", T.gold,   T.goldDim],
-                          ].map(([val,lbl,col,bg])=>{
-                            const on = eventForm.lifeType===val;
-                            return (
-                              <button key={val} onClick={()=>setEventForm(f=>({...f,lifeType:val}))} style={{
-                                flex:1,padding:"8px",fontSize:11,borderRadius:7,cursor:"pointer",
-                                border:`1px solid ${on?col:T.border}`,
-                                background:on?bg:"transparent",
-                                color:on?col:T.text2,transition:"all 0.15s",
-                              }}>{lbl}</button>
-                            );
-                          })}
-                        </div>
-                        <div style={{display:"grid",gridTemplateColumns:"2fr 1fr",gap:10,marginBottom:8}}>
-                          <div>
-                            <div style={{fontSize:10,color:"rgba(255,255,255,0.35)",marginBottom:5,letterSpacing:"0.08em"}}>DESCRIPTION</div>
-                            <input type="text"
-                              placeholder={eventForm.lifeType==="expense"?"New car, wedding, vacation…":eventForm.lifeType==="extra-mortgage"?"Extra principal payment…":"Extra contribution…"}
-                              value={eventForm.lifeLabel}
-                              onChange={e=>setEventForm(f=>({...f,lifeLabel:e.target.value}))}/>
-                          </div>
-                          <div>
-                            <div style={{fontSize:10,color:"rgba(255,255,255,0.35)",marginBottom:5,letterSpacing:"0.08em"}}>AMOUNT ($)</div>
-                            <input type="number" placeholder="10000" value={eventForm.lifeAmount}
-                              onChange={e=>setEventForm(f=>({...f,lifeAmount:e.target.value}))}/>
-                          </div>
-                        </div>
-                        {/* Preview */}
-                        {eventForm.lifeLabel.trim() && eventForm.lifeAmount && parseFloat(eventForm.lifeAmount)>0 && (() => {
-                          const typeColors = { expense:T.red, "extra-mortgage":T.accent, "extra-invest":T.gold };
-                          const typeBgs    = { expense:T.redDim, "extra-mortgage":T.accentDim, "extra-invest":T.goldDim };
-                          const typeDesc   = { expense:"one-time expense", "extra-mortgage":"extra toward principal", "extra-invest":"extra deployed into investments" };
-                          const col = typeColors[eventForm.lifeType]||T.text1;
-                          const bg  = typeBgs[eventForm.lifeType]||T.bg3;
-                          return (
-                            <div style={{fontSize:12,color:col,padding:"8px 12px",background:bg,borderRadius:6}}>
-                              {eventForm.lifeType==="expense"?"−":"+"}<strong>${parseFloat(eventForm.lifeAmount).toLocaleString()}</strong> · {eventForm.lifeLabel.trim()} <span style={{color:T.text2}}>({typeDesc[eventForm.lifeType]})</span>
-                            </div>
-                          );
-                        })()}
-                        {/* Existing life events for this year */}
-                        {lifeEvents.filter(e=>e.year===year).length > 0 && (
-                          <div style={{marginTop:10}}>
-                            <div style={{fontSize:10,color:T.text2,marginBottom:6}}>Events logged this year:</div>
-                            {lifeEvents.filter(e=>e.year===year).map((ev,i)=>(
-                              <div key={i} style={{display:"flex",alignItems:"center",justifyContent:"space-between",fontSize:11,color:T.text1,padding:"4px 0",borderBottom:"1px solid rgba(255,255,255,0.04)"}}>
-                                <span>{ev.type==="expense"?"💸":ev.type==="extra-mortgage"?"🏠":"📈"} {ev.label} — {ev.type==="expense"?"-":"+"}${ev.amount.toLocaleString()}</span>
-                                <button onClick={()=>{ const target=ev; setLifeEvents(p=>{ const idx=p.findIndex(e=>e===target); return idx>=0?[...p.slice(0,idx),...p.slice(idx+1)]:p; }); }} style={{
-                                  background:"transparent",border:"none",color:T.red,fontSize:12,cursor:"pointer",padding:"0 4px",
-                                }}>✕</button>
-                              </div>
-                            ))}
-                          </div>
-                        )}
+                        <input type="text" placeholder="Description…" value={eventForm.lifeLabel} onChange={e=>setEventForm(f=>({...f,lifeLabel:e.target.value}))} style={{flex:1,minWidth:120}}/>
+                        <input type="number" placeholder="Amount" value={eventForm.lifeAmount} onChange={e=>setEventForm(f=>({...f,lifeAmount:e.target.value}))} style={{width:90}}/>
+                        {lifeEvents.filter(e=>e.year===year).map((ev,i)=>(
+                          <span key={i} style={{fontSize:10,color:T.text2,display:"flex",alignItems:"center",gap:3}}>
+                            {ev.type==="expense"?"💸":ev.type==="extra-mortgage"?"🏠":"📈"}{ev.label.slice(0,12)}
+                            <button onClick={()=>{const t=ev;setLifeEvents(p=>{const idx=p.findIndex(e=>e===t);return idx>=0?[...p.slice(0,idx),...p.slice(idx+1)]:p;});}} style={{background:"transparent",border:"none",color:T.red,cursor:"pointer",fontSize:11}}>✕</button>
+                          </span>
+                        ))}
                       </div>
 
                       <div style={{display:"flex",gap:8,marginTop:14}}>
@@ -1570,9 +1396,9 @@ function SalaryPanel({ salaryState, setSalaryState }) {
               );
             })}
           </div>
-        </Card>
+          </div>{/* end rows padding */}
+        </div>{/* end rows wrapper */}
       </div>
-    </div>
   );
 }
 
@@ -1933,11 +1759,10 @@ function ResourcesPanel() {
 
 // ─── ROADMAP TIMELINE VISUAL ──────────────────────────────────────────────────
 
+
 function RoadmapTimeline({ entries, mortgages, contrib401k, investments, lifeEvents, chartData, mortgageData, startAge, startYear }) {
   const [hovered, setHovered] = useState(null);
-  const scrollRef = useRef(null);
 
-  // Gather all individual events
   const allRaw = [
     ...entries.filter(e => e.type !== "start").map(e => ({
       year:e.year, icon:e.type==="promotion"?"🏅":"🏢",
@@ -1945,8 +1770,20 @@ function RoadmapTimeline({ entries, mortgages, contrib401k, investments, lifeEve
       color:T.accent,
     })),
     ...mortgages.map(m => ({ year:m.year, icon:"🏠", label:`Home — ${fmt(m.price)} at ${m.rate}%`, color:"#60a5fa" })),
-    ...contrib401k.filter(e=>e.pct>0).map(e => ({ year:e.year, icon:"💼", label:`401k → ${e.pct}%`, color:T.green })),
-    ...investments.filter(e=>e.pct>0).map(e => ({ year:e.year, icon:"📈", label:`${e.pct}% → ${e.ticker||"VOO"}`, color:T.gold })),
+    ...contrib401k.filter(e=>e.pct>0).map((e,i,arr) => {
+      const prev = arr.slice(0,i).reverse().find(p=>p.year<e.year) || contrib401k.filter(x=>x.year<e.year).slice(-1)[0];
+      const prevPct = prev ? prev.pct : 0;
+      const arrow = e.pct > prevPct ? " ▲" : e.pct < prevPct ? " ▼" : "";
+      const arrowColor = e.pct > prevPct ? "#4ade80" : "#f87171";
+      return { year:e.year, icon:"💼", label:`401k ${e.pct}%${arrow}`, labelArrow:arrow, arrowColor, prevPct, color:T.green };
+    }),
+    ...investments.filter(e=>e.pct>0).map((e,i,arr) => {
+      const prev = investments.filter(x=>x.year<e.year).slice(-1)[0];
+      const prevPct = prev ? prev.pct : 0;
+      const arrow = e.pct > prevPct ? " ▲" : e.pct < prevPct ? " ▼" : "";
+      const arrowColor = e.pct > prevPct ? "#4ade80" : "#f87171";
+      return { year:e.year, icon:"📈", label:`Invest ${e.pct}%${arrow}`, labelArrow:arrow, arrowColor, prevPct, color:T.gold };
+    }),
     ...lifeEvents.map(e => ({
       year:e.year,
       icon:e.type==="expense"?"💸":e.type==="extra-mortgage"?"🏠":"📈",
@@ -1955,7 +1792,6 @@ function RoadmapTimeline({ entries, mortgages, contrib401k, investments, lifeEve
     })),
   ];
 
-  // Milestones
   const seenNW = new Set();
   for (const pt of chartData) {
     for (const th of [100000,250000,500000,1000000]) {
@@ -1975,7 +1811,6 @@ function RoadmapTimeline({ entries, mortgages, contrib401k, investments, lifeEve
     }
   }
 
-  // Group by year → sorted array of { year, events[] }
   const byYear = {};
   for (const ev of allRaw) {
     if (!byYear[ev.year]) byYear[ev.year] = [];
@@ -1984,106 +1819,107 @@ function RoadmapTimeline({ entries, mortgages, contrib401k, investments, lifeEve
   const groups = Object.keys(byYear).map(y=>({ year:+y, events:byYear[y] })).sort((a,b)=>a.year-b.year);
   if (!groups.length) return null;
 
+  const BUBBLE = 34, OVERLAP = 14;
   const getAge = year => startAge ? startAge+(year-startYear) : null;
   const getLabel = year => { const a=getAge(year); return a?`Age ${a}`:String(year); };
 
-  const CARD_W = 110, GAP = 20;
-  const BUBBLE = 34, OVERLAP = 14; // px each bubble stacks under previous
-
-  const scroll = dir => scrollRef.current?.scrollBy({left:dir*(CARD_W+GAP)*3,behavior:"smooth"});
+  // Proportional positioning based on year
+  const firstYear = startYear;
+  const lastYear  = groups[groups.length-1].year;
+  const span = Math.max(lastYear - firstYear, 1);
+  const toPct = year => ((year - firstYear) / span) * 100;
 
   return (
-    <div style={{padding:"6px 0 2px",position:"relative"}}>
-      <button onClick={()=>scroll(-1)} style={{
-        position:"absolute",left:0,top:"50%",transform:"translateY(-50%)",zIndex:5,
-        width:26,height:26,borderRadius:"50%",background:"rgba(0,0,0,0.65)",
-        border:"1px solid rgba(255,255,255,0.15)",color:"#fff",fontSize:14,cursor:"pointer",
-        display:"flex",alignItems:"center",justifyContent:"center",
-      }}>‹</button>
+    <div style={{padding:"6px 8px 2px",position:"relative",width:"100%"}}>
+      {/* Winding SVG path connecting events */}
+      {/* Straight dashed line */}
+      <div style={{
+        position:"absolute",
+        top: BUBBLE/2 + 6,
+        left:8, right:8,
+        borderTop:"2px dashed rgba(255,255,255,0.15)",
+        pointerEvents:"none",
+      }}/>
 
-      <div ref={scrollRef} style={{overflowX:"auto",scrollBehavior:"smooth",padding:"4px 34px",scrollbarWidth:"none",msOverflowStyle:"none"}}>
-        <div style={{display:"flex",alignItems:"flex-start",gap:GAP,position:"relative",paddingBottom:4}}>
-          {/* Dashed connecting line through centre of bubbles */}
-          <div style={{position:"absolute",top:BUBBLE/2,left:0,right:0,borderTop:"2px dashed rgba(255,255,255,0.1)",pointerEvents:"none"}}/>
+      {/* Events positioned proportionally */}
+      <div style={{position:"relative",height: BUBBLE + (Math.max(...groups.map(g=>g.events.length))-1)*OVERLAP + 36, minHeight:80}}>
+        {groups.map((g, gi) => {
+          const isHov = hovered===gi;
+          const multi = g.events.length > 1;
+          const stackH = BUBBLE + (g.events.length-1)*OVERLAP;
+          const domColor = g.events[0].color;
+          const leftPct = toPct(g.year);
 
-          {groups.map((g, gi) => {
-            const isHov = hovered===gi;
-            const multi = g.events.length > 1;
-            // Stack height: first bubble + (n-1)*overlap
-            const stackH = BUBBLE + (g.events.length-1)*OVERLAP;
-            // dominant color = first event's color
-            const domColor = g.events[0].color;
-
-            return (
-              <div key={gi}
-                onMouseEnter={()=>setHovered(gi)}
-                onMouseLeave={()=>setHovered(null)}
-                style={{flexShrink:0,width:CARD_W,display:"flex",flexDirection:"column",alignItems:"center",gap:4,cursor:"default",position:"relative",zIndex:isHov?10:1}}>
-
-                {/* Stacked bubbles */}
-                <div style={{position:"relative",width:BUBBLE,height:stackH,flexShrink:0}}>
-                  {g.events.map((ev,ei) => {
-                    const offset = ei*OVERLAP;
-                    const isTop  = ei===g.events.length-1;
-                    return (
-                      <div key={ei} style={{
-                        position:"absolute",top:offset,left:0,
-                        width:BUBBLE,height:BUBBLE,borderRadius:"50%",
-                        background:isHov ? ev.color+"44" : "rgba(0,0,0,0.6)",
-                        border:`2px solid ${isHov?ev.color:ev.color+"99"}`,
-                        display:"flex",alignItems:"center",justifyContent:"center",
-                        fontSize:15,transition:"all 0.15s",
-                        zIndex:g.events.length-ei,
-                        boxShadow:isHov?`0 0 10px ${ev.color}55`:"none",
-                      }}>{ev.icon}</div>
-                    );
-                  })}
-                  {/* Count badge if multiple */}
-                  {multi && (
-                    <div style={{
-                      position:"absolute",top:-4,right:-6,
-                      width:16,height:16,borderRadius:"50%",
-                      background:domColor,border:"1px solid rgba(0,0,0,0.4)",
-                      fontSize:9,color:"#000",fontWeight:700,
-                      display:"flex",alignItems:"center",justifyContent:"center",
-                      zIndex:20,
-                    }}>{g.events.length}</div>
-                  )}
-                </div>
-
-                {/* Age label */}
-                <div style={{fontSize:9,color:isHov?"rgba(255,255,255,0.6)":"rgba(255,255,255,0.28)",letterSpacing:"0.06em",textAlign:"center",marginTop:2}}>
-                  {getLabel(g.year)}
-                </div>
-
-                {/* On hover: show all event labels stacked */}
-                {isHov ? (
-                  <div style={{display:"flex",flexDirection:"column",gap:3,width:"100%"}}>
-                    {g.events.map((ev,ei)=>(
-                      <div key={ei} style={{fontSize:10,color:ev.color,textAlign:"center",lineHeight:1.3,wordBreak:"break-word"}}>
-                        {ev.label}
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div style={{fontSize:10,color:T.text2,textAlign:"center",lineHeight:1.3,
-                    overflow:"hidden",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",
-                    wordBreak:"break-word",maxWidth:CARD_W}}>
-                    {g.events[0].label}{multi?` +${g.events.length-1} more`:""}
-                  </div>
+          return (
+            <div key={gi}
+              onMouseEnter={()=>setHovered(gi)}
+              onMouseLeave={()=>setHovered(null)}
+              style={{
+                position:"absolute",
+                left:`${leftPct}%`,
+                transform:"translateX(-50%)",
+                top:0,
+                display:"flex",flexDirection:"column",alignItems:"center",gap:3,
+                cursor:"default",zIndex:isHov?10:1,
+                width:90,
+              }}>
+              {/* Stacked bubbles */}
+              <div style={{position:"relative",width:BUBBLE,height:stackH,flexShrink:0}}>
+                {g.events.map((ev,ei) => (
+                  <div key={ei} style={{
+                    position:"absolute",top:ei*OVERLAP,left:0,
+                    width:BUBBLE,height:BUBBLE,borderRadius:"50%",
+                    background:isHov?ev.color+"44":"rgba(0,0,0,0.6)",
+                    border:`2px solid ${isHov?ev.color:ev.color+"99"}`,
+                    display:"flex",alignItems:"center",justifyContent:"center",
+                    fontSize:14,transition:"all 0.15s",
+                    zIndex:g.events.length-ei,
+                    boxShadow:isHov?`0 0 10px ${ev.color}55`:"none",
+                  }}>{ev.icon}</div>
+                ))}
+                {multi && (
+                  <div style={{
+                    position:"absolute",top:-4,right:-4,
+                    width:16,height:16,borderRadius:"50%",
+                    background:domColor,border:"1px solid rgba(0,0,0,0.5)",
+                    fontSize:9,color:"#000",fontWeight:700,
+                    display:"flex",alignItems:"center",justifyContent:"center",zIndex:20,
+                  }}>{g.events.length}</div>
                 )}
               </div>
-            );
-          })}
-        </div>
-      </div>
 
-      <button onClick={()=>scroll(1)} style={{
-        position:"absolute",right:0,top:"50%",transform:"translateY(-50%)",zIndex:5,
-        width:26,height:26,borderRadius:"50%",background:"rgba(0,0,0,0.65)",
-        border:"1px solid rgba(255,255,255,0.15)",color:"#fff",fontSize:14,cursor:"pointer",
-        display:"flex",alignItems:"center",justifyContent:"center",
-      }}>›</button>
+              {/* Age label */}
+              <div style={{fontSize:9,color:isHov?"rgba(255,255,255,0.6)":"rgba(255,255,255,0.28)",textAlign:"center",whiteSpace:"nowrap"}}>
+                {getLabel(g.year)}
+              </div>
+
+              {/* Hover: show all event labels */}
+              {isHov && (
+                <div style={{
+                  position:"absolute",top:"100%",
+                  ...(gi===0 ? {left:0,transform:"none"} : gi===groups.length-1 ? {right:0,left:"auto",transform:"none"} : {left:"50%",transform:"translateX(-50%)"}),
+                  background:T.bg2,border:`1px solid ${domColor}`,borderRadius:8,
+                  padding:"6px 10px",zIndex:20,minWidth:140,maxWidth:220,
+                  boxShadow:"0 4px 20px rgba(0,0,0,0.8)",
+                }}>
+                  {g.events.map((ev,ei)=>(
+                    <div key={ei} style={{fontSize:10,lineHeight:1.4,whiteSpace:"normal",wordBreak:"break-word",padding:"1px 0",display:"flex",alignItems:"center",gap:3}}>
+                      {ev.labelArrow ? (
+                        <>
+                          <span style={{color:ev.color}}>{ev.label.replace(ev.labelArrow,"")}</span>
+                          <span style={{color:ev.arrowColor,fontWeight:700}}>{ev.labelArrow.trim()}</span>
+                        </>
+                      ) : (
+                        <span style={{color:ev.color}}>{ev.label}</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -2110,6 +1946,8 @@ const NAV_SECTIONS = [
 ───────────────────────────────────────────────────────────── */
 export default function App() {
   const [active, setActive] = useState("salary");
+  const [navExpanded, setNavExpanded] = useState(false);
+  const [navShimmer, setNavShimmer] = useState(false);
   const [salaryState, setSalaryState] = useState({
     entries: [],
     rate: 3,
@@ -2125,33 +1963,69 @@ export default function App() {
   return (
     <>
       <style>{CSS}</style>
-      <div style={{display:"flex",height:"100vh",overflow:"hidden"}}>
+      <div style={{display:"flex",height:"100vh",overflow:"hidden",position:"relative"}}>
 
-        {/* Sidebar */}
-        <aside style={{width:234,minWidth:234,background:T.sidebar,borderRight:`1px solid ${T.border}`,display:"flex",flexDirection:"column",flexShrink:0}}>
-          <div style={{padding:"1.4rem 1.25rem 1.1rem",borderBottom:`1px solid ${T.border}`}}>
-            <div style={{fontFamily:"'Syne',sans-serif",fontSize:15,fontWeight:800,color:T.text0,lineHeight:1.25}}>My Financial Roadmap</div>
-            <div style={{fontSize:11,color:T.text2,marginTop:4}}>By Dallin Stout</div>
+
+        {/* Sidebar — collapses to icon-only when mouse leaves */}
+        <aside
+          onMouseEnter={()=>{ setNavExpanded(true); setNavShimmer(true); setTimeout(()=>setNavShimmer(false), 800); }}
+          onMouseLeave={()=>setNavExpanded(false)}
+          style={{
+            width: navExpanded ? 220 : 52,
+            minWidth: navExpanded ? 220 : 52,
+            background:T.sidebar,
+            borderRight:`1px solid ${T.border}`,
+            display:"flex",flexDirection:"column",flexShrink:0,
+            transition:"width 0.22s cubic-bezier(0.4,0,0.2,1), min-width 0.22s cubic-bezier(0.4,0,0.2,1)",
+            overflow:"hidden",
+            position:"relative",
+          }}
+          className={navShimmer ? "nav-shimmer" : ""}>
+
+          {/* Header */}
+          <div style={{padding:"1.2rem 0",borderBottom:`1px solid ${T.border}`,display:"flex",flexDirection:"column",alignItems:"center",flexShrink:0,minHeight:72}}>
+            {navExpanded ? (
+              <div style={{padding:"0 1rem",width:"100%"}}>
+                <div style={{fontFamily:"'Syne',sans-serif",fontSize:13,fontWeight:800,color:T.text0,lineHeight:1.25}}>My Financial</div>
+                <div style={{fontFamily:"'Syne',sans-serif",fontSize:13,fontWeight:800,color:T.text0,lineHeight:1.25}}>Roadmap</div>
+                <div style={{fontSize:10,color:T.text2,marginTop:3}}>By Dallin Stout</div>
+              </div>
+            ) : (
+              <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:0}}>
+                {["M","F","R"].map((letter,i) => (
+                  <div key={i} style={{fontFamily:"'Syne',sans-serif",fontSize:12,fontWeight:800,color:T.text0,lineHeight:1.15}}>{letter}</div>
+                ))}
+                <div style={{fontSize:9,color:T.text2,marginTop:3,letterSpacing:"0.04em"}}>By DS</div>
+              </div>
+            )}
           </div>
 
-          <nav style={{padding:"0.75rem",flex:1,overflowY:"auto"}}>
+          {/* Nav items */}
+          <nav style={{padding:"0.5rem 0",flex:1,overflowY:"auto",overflowX:"hidden"}}>
             {NAV_SECTIONS.map(sec => (
-              <div key={sec.label||"top"} style={{marginBottom:"0.5rem"}}>
-                {sec.label && <div style={{fontSize:9,color:T.text2,letterSpacing:"0.14em",textTransform:"uppercase",padding:"0 0.5rem",marginBottom:4,marginTop:8}}>{sec.label}</div>}
+              <div key={sec.label||"top"} style={{marginBottom:"0.25rem"}}>
+                {sec.label && navExpanded && (
+                  <div style={{fontSize:9,color:T.text2,letterSpacing:"0.14em",textTransform:"uppercase",padding:"0 0.75rem",marginBottom:4,marginTop:8,whiteSpace:"nowrap"}}>{sec.label}</div>
+                )}
                 {sec.items.map(item => {
                   const on = active===item.id;
                   return (
-                    <button key={item.id} onClick={()=>setActive(item.id)} style={{
-                      display:"flex",alignItems:"center",gap:10,width:"100%",padding:"8px 12px",
-                      borderRadius:8,border:"none",fontSize:13,textAlign:"left",
+                    <button key={item.id} onClick={()=>setActive(item.id)} title={item.label} style={{
+                      display:"flex",alignItems:"center",
+                      justifyContent: navExpanded ? "flex-start" : "center",
+                      gap:10,width:"100%",
+                      padding: navExpanded ? "8px 14px" : "10px 0",
+                      borderRadius:0,border:"none",fontSize:13,textAlign:"left",
                       transition:"all 0.15s",marginBottom:1,position:"relative",
-                      background:on?T.accentDim:"transparent",color:on?T.accent:T.text1,fontWeight:on?500:400,
+                      background:on?T.accentDim:"transparent",
+                      color:on?T.accent:T.text1,fontWeight:on?500:400,
                     }}
                       onMouseEnter={e=>{if(!on)e.currentTarget.style.background=T.bg3;}}
                       onMouseLeave={e=>{if(!on)e.currentTarget.style.background="transparent";}}>
-                      {on && <span style={{position:"absolute",left:0,top:"20%",bottom:"20%",width:3,borderRadius:"0 2px 2px 0",background:T.accent}}/>}
-                      <span style={{fontSize:15,opacity:on?1:0.55}}>{item.icon}</span>
-                      <span>{item.label}</span>
+                      {on && navExpanded && <span style={{position:"absolute",left:0,top:"20%",bottom:"20%",width:3,borderRadius:"0 2px 2px 0",background:T.accent}}/>}
+                      {on && !navExpanded && <span style={{position:"absolute",left:0,top:"20%",bottom:"20%",width:3,borderRadius:"0 2px 2px 0",background:T.accent}}/>}
+                      <span style={{fontSize:navExpanded?15:18,opacity:on?1:0.6,flexShrink:0}}>{item.icon}</span>
+                      {navExpanded && <span style={{whiteSpace:"nowrap"}}>{item.label}</span>}
                     </button>
                   );
                 })}
@@ -2159,7 +2033,9 @@ export default function App() {
             ))}
           </nav>
 
-          <div style={{padding:"0.9rem 1.25rem",borderTop:`1px solid ${T.border}`,fontSize:10,color:T.text2}}>v0.2 · in progress</div>
+          {navExpanded && (
+            <div style={{padding:"0.9rem 1rem",borderTop:`1px solid ${T.border}`,fontSize:10,color:T.text2,whiteSpace:"nowrap"}}>v0.2 · in progress</div>
+          )}
         </aside>
 
         {/* Right */}

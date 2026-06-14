@@ -892,58 +892,53 @@ function RoadmapPanel({ state, setState }) {
   );
 }
 
+const FINNHUB_KEY = "d8do22pr01qhm4ag8c30d8do22pr01qhm4ag8c3g";
 const TICKERS = ["SPY","QQQ","AAPL","MSFT","NVDA","GOOGL","AMZN","TSLA","JPM","MU"];
 
 function TickerBar() {
-  const [quotes, setQuotes] = useState([]);
+  const [quotes, setQuotes] = useState({});
   const [status, setStatus] = useState("loading");
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-6",
-          max_tokens: 800,
-          tools: [{ type: "web_search_20250305", name: "web_search" }],
-          messages: [{ role: "user", content: `Return ONLY a valid JSON array (no markdown, no explanation) with current stock data for: ${TICKERS.join(",")}. Format: [{"t":"AAPL","p":213.45,"c":1.23},...] where p=price, c=changePercent.` }]
-        })
-      });
-      const data = await res.json();
-      const text = (data.content||[]).filter(b=>b.type==="text").map(b=>b.text).join("");
-      const match = text.match(/\[[\s\S]*\]/);
-      if (match) {
-        const arr = JSON.parse(match[0]);
-        setQuotes(arr);
-        setStatus("ok");
-      } else { setStatus("err"); }
+      const results = await Promise.all(
+        TICKERS.map(t =>
+          fetch(`https://finnhub.io/api/v1/quote?symbol=${t}&token=${FINNHUB_KEY}`)
+            .then(r => r.ok ? r.json() : null)
+            .catch(() => null)
+        )
+      );
+      const next = {};
+      results.forEach((d, i) => { if (d && d.c) next[TICKERS[i]] = d; });
+      if (Object.keys(next).length) { setQuotes(next); setStatus("ok"); }
+      else setStatus("err");
     } catch(e) { setStatus("err"); }
   }, []);
 
-  useEffect(() => { load(); const id = setInterval(load, 120000); return () => clearInterval(id); }, [load]);
+  useEffect(() => { load(); const id = setInterval(load, 90000); return () => clearInterval(id); }, [load]);
 
   const barStyle = {height:28,background:"#08080f",borderBottom:"1px solid rgba(255,255,255,0.08)",display:"flex",alignItems:"center",overflow:"hidden",flexShrink:0};
 
-  if (status === "loading" && quotes.length === 0)
+  if (status === "loading" && !Object.keys(quotes).length)
     return <div style={{...barStyle,paddingLeft:14,fontSize:11,color:"rgba(255,255,255,0.3)"}}>Loading market data…</div>;
-  if (status === "err" && quotes.length === 0)
+  if (status === "err" && !Object.keys(quotes).length)
     return <div style={{...barStyle,paddingLeft:14,fontSize:11,color:"rgba(255,255,255,0.25)"}}>Market data unavailable</div>;
 
   return (
     <div style={barStyle}>
-      {quotes.map((q,i) => {
-        const up = q.c >= 0;
+      {TICKERS.filter(t => quotes[t]).map(t => {
+        const q = quotes[t];
+        const up = q.dp >= 0;
         return (
-          <div key={i} style={{display:"flex",alignItems:"center",gap:5,padding:"0 12px",borderRight:"1px solid rgba(255,255,255,0.06)",flexShrink:0}}>
-            <span style={{fontSize:11,fontWeight:700,color:"rgba(255,255,255,0.85)",fontFamily:"monospace"}}>{q.t}</span>
-            <span style={{fontSize:11,color:"rgba(255,255,255,0.55)",fontFamily:"monospace"}}>${Number(q.p).toFixed(2)}</span>
-            <span style={{fontSize:10,fontWeight:600,color:up?"#4ade80":"#f87171",fontFamily:"monospace"}}>{up?"+":""}{Number(q.c).toFixed(2)}%</span>
+          <div key={t} style={{display:"flex",alignItems:"center",gap:5,padding:"0 12px",borderRight:"1px solid rgba(255,255,255,0.06)",flexShrink:0}}>
+            <span style={{fontSize:11,fontWeight:700,color:"rgba(255,255,255,0.85)",fontFamily:"monospace"}}>{t}</span>
+            <span style={{fontSize:11,color:"rgba(255,255,255,0.55)",fontFamily:"monospace"}}>${q.c?.toFixed(2)}</span>
+            <span style={{fontSize:10,fontWeight:600,color:up?"#4ade80":"#f87171",fontFamily:"monospace"}}>{up?"+":""}{q.dp?.toFixed(2)}%</span>
           </div>
         );
       })}
       <div style={{flex:1}}/>
-      <div style={{padding:"0 10px",fontSize:9,color:"rgba(255,255,255,0.2)",flexShrink:0}}>live · 2min refresh</div>
+      <div style={{padding:"0 10px",fontSize:9,color:"rgba(255,255,255,0.2)",flexShrink:0}}>Finnhub · 90s</div>
     </div>
   );
 }

@@ -19,7 +19,7 @@ const fmtFull = v => "$" + Math.round(v).toLocaleString();
 const BG = {
   roadmap: "https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?w=1920&q=80",
   budget:  "https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?w=1920&q=80",
-  profile: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=1920&q=80",
+  profile: "https://images.unsplash.com/photo-1486325212027-8081e485255e?w=1920&q=80",
 };
 function InPlotLegend({ items }) {
   return ({ xAxisMap, margin }) => {
@@ -630,124 +630,113 @@ function RoadmapPanel({ state, setState }) {
                 setFhForm({ rate: "", portPct: "", equityPct: "", dti: "", savingsPct: "", targetAge: "" });
               };
               return (<>
-                {/* ROW 0: Tabs */}
-                <div style={{display:"flex",alignItems:"center",gap:5,flexWrap:"nowrap",overflowX:"auto",flexShrink:0,marginBottom:4,paddingBottom:2}}>
+                {/* TABS ROW */}
+                <div style={{display:"flex",alignItems:"center",gap:5,flexWrap:"nowrap",overflowX:"auto",flexShrink:0,marginBottom:6,paddingBottom:2}}>
                   {savedFhList.map((p,i)=>(
                     <button key={i} onClick={()=>{setActiveFhIdx(i);setFhForm(p);}}
                       style={{fontSize:10,fontWeight:activeFhIdx===i?700:400,padding:"3px 10px",borderRadius:5,cursor:"pointer",border:`1px solid ${activeFhIdx===i?"#818cf8":T.border}`,background:activeFhIdx===i?"rgba(129,140,248,0.2)":"transparent",color:activeFhIdx===i?"#818cf8":T.text2,whiteSpace:"nowrap",flexShrink:0}}>
-                      🏠 Age {p.targetAge} — {fmtK(p.savedMaxPrice||0)}
+                      🏠 Age {p.targetAge} — {fmtFull(p.savedMaxPrice||0)}
                     </button>
                   ))}
-
                   <div style={{flex:1}}/>
                   {isLocked && (
                     <button onClick={()=>{
-                      const entry = savedFhList[activeFhIdx];
+                      const entry=savedFhList[activeFhIdx];
                       setEditingFhIdx(activeFhIdx);
-                      setFhForm({rate:entry.rate||"",portPct:entry.portPct||"",equityPct:entry.equityPct||"",dti:entry.dti||"",targetAge:entry.targetAge||""});
+                      setFhForm({rate:entry.rate||"",portPct:entry.portPct||"",equityPct:entry.equityPct||"",dti:entry.dti||"",savingsPct:entry.savingsPct||"",targetAge:entry.targetAge||""});
                       setActiveFhIdx(null);
                     }} style={{fontSize:10,color:T.gold,background:"rgba(251,191,36,0.1)",border:`1px solid ${T.gold}`,borderRadius:4,padding:"2px 9px",cursor:"pointer",flexShrink:0,marginRight:4}}>✏️ Edit</button>
                   )}
                   <button onClick={()=>setShowFutureHome(false)} style={{fontSize:10,color:T.text2,background:"transparent",border:`1px solid ${T.border}`,borderRadius:4,padding:"1px 7px",cursor:"pointer",flexShrink:0}}>✕</button>
                 </div>
 
-                {/* ROW 1: Input fields across one row */}
-                {(() => {
-                  const inp2 = (key, ph, opts={}) => (
-                    <div style={{flex:1,minWidth:0}}>
-                      <div style={{fontSize:9,color:T.text2,marginBottom:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{opts.label||ph}</div>
-                      <input type="number" placeholder={ph} step={opts.step||"1"} min={opts.min||0} max={opts.max||999}
-                        value={displayForm[key]||""}
-                        readOnly={!!opts.disabled||isLocked}
-                        onChange={e=>{if(!opts.disabled&&!isLocked)setFhForm(f=>({...f,[key]:e.target.value}));}}
-                        style={{width:"100%",background:isLocked?"rgba(255,255,255,0.04)":"#1a1a2a",border:`1px solid ${key==="targetAge"&&earlyError?"#f87171":isLocked?"rgba(255,255,255,0.06)":"rgba(255,255,255,0.12)"}`,borderRadius:5,color:isLocked?"rgba(255,255,255,0.45)":key==="targetAge"&&earlyError?"#f87171":"#f0f0f2",fontFamily:"inherit",fontSize:12,padding:"5px 7px",outline:"none",cursor:isLocked?"default":"text"}}/>
-                    </div>
-                  );
-                  return (
-                    <div style={{display:"flex",gap:5,flexShrink:0}}>
-                      {inp2("rate",      "e.g. 6.5",            {label:"Interest Rate %", step:"0.1"})}
-                      {inp2("portPct",   "0-100",               {label:"% Portfolio"})}
-                      <div style={{flex:1,minWidth:0,opacity:hasPriorHome?1:0.35}}>
-                        <div style={{fontSize:9,color:T.text2,marginBottom:2,whiteSpace:"nowrap"}}>Prior Equity %{!hasPriorHome?" (none)":""}</div>
-                        <input type="number" placeholder="0-100" min="0" max="100"
-                          value={displayForm.equityPct||""}
-                          readOnly={!hasPriorHome||isLocked}
-                          onChange={e=>{if(hasPriorHome&&!isLocked)setFhForm(f=>({...f,equityPct:e.target.value}));}}
-                          style={{width:"100%",background:isLocked||!hasPriorHome?"rgba(255,255,255,0.04)":"#1a1a2a",border:`1px solid rgba(255,255,255,${isLocked||!hasPriorHome?"0.06":"0.12"})`,borderRadius:5,color:(isLocked||!hasPriorHome)?"rgba(255,255,255,0.35)":"#f0f0f2",fontFamily:"inherit",fontSize:12,padding:"5px 7px",outline:"none"}}/>
-                      </div>
-                      {inp2("dti",       "e.g. 36",             {label:"DTI %", max:60})}
-                      {inp2("savingsPct", "e.g. 25",            {label:"% Savings"})}
+                {/* MAIN BODY */}
+                <div style={{flex:1,display:"flex",flexDirection:"row",gap:14,minHeight:0,overflow:"hidden"}}>
 
-                    </div>
-                  );
-                })()}
-
-                {/* ROW 2: Component bubbles */}
-                {(canShow || isLocked) && (
-                  <div style={{display:"flex",gap:5,flexShrink:0}}>
+                  {/* LEFT: inputs stacked */}
+                  <div style={{width:155,flexShrink:0,display:"flex",flexDirection:"column",gap:8}}>
                     {[
-                      {lbl:"Portfolio",          val:pieNetPort,   color:T.gold},
-                      {lbl:"Equity Used",        val:pieUsedEq,   color:"#7dd3fc", hide:!hasPriorHome},
-                      {lbl:"Max Loan (today $)", val:pieLoanToday, color:T.accent},
-                      {lbl:"Fees",               val:pieBuySell,  color:T.red},
-                    ].filter(r=>!r.hide).map((r,i)=>(
-                      <div key={i} style={{flex:1,background:"rgba(255,255,255,0.04)",borderRadius:7,padding:"5px 8px",minWidth:0}}>
-                        <div style={{fontSize:9,color:T.text2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{r.lbl}</div>
-                        <div style={{fontSize:13,fontWeight:800,color:r.color,whiteSpace:"nowrap"}}>{fmtK(r.val)}</div>
+                      {key:"rate",      label:"Interest Rate %",  ph:"e.g. 6.5", step:"0.1"},
+                      {key:"portPct",   label:"% Portfolio",      ph:"0–100"},
+                      {key:"equityPct", label:"% Prior Equity",   ph:"0–100", disabled:!hasPriorHome},
+                      {key:"dti",       label:"DTI %",            ph:"e.g. 36"},
+                      {key:"savingsPct",label:"% Savings",        ph:"0–100"},
+                    ].map(({key,label,ph,step,disabled})=>(
+                      <div key={key} style={{opacity:disabled?0.35:1}}>
+                        <div style={{fontSize:9,color:T.text2,marginBottom:2}}>{label}{disabled?" (none)":""}</div>
+                        <input type="number" placeholder={ph} step={step||"1"} min="0" max="100"
+                          value={displayForm[key]||""}
+                          readOnly={!!disabled||isLocked}
+                          onChange={e=>{if(!disabled&&!isLocked)setFhForm(f=>({...f,[key]:e.target.value}));}}
+                          style={{width:"100%",background:isLocked?"rgba(255,255,255,0.04)":"rgba(10,10,20,0.8)",border:`1px solid ${isLocked?"rgba(255,255,255,0.06)":"rgba(255,255,255,0.15)"}`,borderRadius:5,color:isLocked?"rgba(255,255,255,0.45)":"#f0f0f2",fontFamily:"inherit",fontSize:12,padding:"6px 8px",outline:"none"}}/>
                       </div>
                     ))}
+                    <div style={{flex:1}}/>
+                    {canSave && !isLocked && (
+                      <button onClick={saveHome} style={{padding:"8px 0",fontSize:12,fontWeight:700,color:"#fff",background:"rgba(129,140,248,0.25)",border:"1px solid #818cf8",borderRadius:6,cursor:"pointer",width:"100%",marginTop:"auto"}}>
+                        ➕ Add Age {targetAge}
+                      </button>
+                    )}
                   </div>
-                )}
 
-                {/* ROW 3: Max Home Price full-width */}
-                {(canShow || isLocked) && (
-                  <div style={{background:"rgba(129,140,248,0.12)",border:"1px solid rgba(129,140,248,0.3)",borderRadius:8,padding:"6px 12px",flexShrink:0}}>
-                    <div style={{fontSize:10,color:T.text2}}>Max Home Price <span style={{fontSize:9,color:"#818cf8"}}>(today&apos;s $)</span></div>
-                    <div style={{fontSize:22,fontWeight:800,color:"#fff"}}>{fmtFull(pieMaxPrice)}</div>
-                    {yearsUntil>0&&<div style={{fontSize:8,color:"rgba(255,255,255,0.3)"}}>Loan discounted {yearsUntil}yr @ {assumptions.inflation||3}% · nominal {fmtK(maxPriceNominal)}</div>}
-                  </div>
-                )}
+                  {/* RIGHT: numbers + price + pie + legend */}
+                  <div style={{flex:1,display:"flex",flexDirection:"column",gap:8,minWidth:0,overflow:"hidden"}}>
+                    {(canShow || isLocked) ? (<>
 
-                {/* ROW 4: Pie chart centered + legend below */}
-                {(canShow || isLocked) && slices.length > 0 && (
-                  <div style={{flex:1,display:"flex",flexDirection:"row",alignItems:"center",gap:16,overflow:"hidden",minHeight:0}}>
-                    <svg width={275} height={275} viewBox="0 0 110 110" style={{flexShrink:0}}>
-                      {slices.map((s,i)=>{
-                        if(s.a<0.5) return null;
-                        if(s.a>=359.9) return <circle key={i} cx={55} cy={55} r={44} fill={s.color} opacity={0.9}/>;
-                        const [x1,y1]=P(55,55,44,s.start);
-                        const [x2,y2]=P(55,55,44,s.start+s.a);
-                        const lg=s.a>180?1:0;
-                        return <path key={i} d={`M55 55 L${x1.toFixed(1)} ${y1.toFixed(1)} A44 44 0 ${lg} 1 ${x2.toFixed(1)} ${y2.toFixed(1)} Z`} fill={s.color} opacity={0.88}/>;
-                      })}
-                    </svg>
-                    <div style={{display:"flex",flexDirection:"column",gap:10,justifyContent:"center"}}>
-                      {slices.map((s,i)=>(
-                        <div key={i} style={{display:"flex",alignItems:"baseline",gap:8}}>
-                          <span style={{fontSize:14,color:s.color,lineHeight:1,flexShrink:0}}>●</span>
-                          <div>
-                            <div style={{fontSize:12,color:T.text1,fontWeight:600}}>{s.label}</div>
-                            <div style={{fontSize:11,color:s.color,fontWeight:700}}>{Math.round(s.val/pieTotal*100)}% · {fmtK(s.val)}</div>
+                      {/* 5 component bubbles in a row */}
+                      <div style={{display:"flex",gap:5,flexShrink:0}}>
+                        {[
+                          {lbl:"Portfolio",    val:pieNetPort,   color:T.gold},
+                          {lbl:"Equity",       val:pieUsedEq,   color:"#7dd3fc", hide:!hasPriorHome},
+                          {lbl:"Savings",      val:savAmt,       color:"#34d399"},
+                          {lbl:"Loan",         val:pieLoanToday, color:T.accent},
+                          {lbl:"Fees",         val:pieBuySell,  color:T.red},
+                        ].filter(r=>!r.hide && r.val > 0).map((r,i)=>(
+                          <div key={i} style={{flex:1,background:"rgba(6,6,16,0.75)",border:`1px solid rgba(255,255,255,0.08)`,borderRadius:7,padding:"5px 8px",minWidth:0}}>
+                            <div style={{fontSize:9,color:T.text2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{r.lbl}</div>
+                            <div style={{fontSize:13,fontWeight:800,color:r.color,whiteSpace:"nowrap"}}>{fmtK(r.val)}</div>
                           </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
+                        ))}
+                      </div>
 
-                {!canShow && !isLocked && (
-                  <div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",color:T.text2,fontSize:12,textAlign:"center"}}>
-                    Enter a target age and interest rate to see your breakdown
+                      {/* Max Home Price full-width */}
+                      <div style={{background:"rgba(129,140,248,0.12)",border:"1px solid rgba(129,140,248,0.3)",borderRadius:8,padding:"6px 12px",flexShrink:0}}>
+                        <div style={{fontSize:10,color:T.text2}}>Max Home Price <span style={{fontSize:9,color:"#818cf8"}}>(today&apos;s $)</span></div>
+                        <div style={{fontSize:26,fontWeight:800,color:"#fff"}}>{fmtFull(pieMaxPrice)}</div>
+                        {(isLocked?lockedSnap?.savedInflYears:yearsUntil)>0&&<div style={{fontSize:8,color:"rgba(255,255,255,0.3)"}}>Loan discounted {isLocked?lockedSnap.savedInflYears:yearsUntil}yr @ {assumptions.inflation||3}% · nominal {fmtK(isLocked?lockedSnap.savedMaxNominal:maxPriceNominal)}</div>}
+                      </div>
+
+                      {/* Pie centered */}
+                      <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:8,minHeight:0}}>
+                        <svg width={220} height={220} viewBox="0 0 110 110">
+                          {slices.map((s,i)=>{
+                            if(s.a<0.5) return null;
+                            if(s.a>=359.9) return <circle key={i} cx={55} cy={55} r={44} fill={s.color} opacity={0.9}/>;
+                            const [x1,y1]=P(55,55,44,s.start);
+                            const [x2,y2]=P(55,55,44,s.start+s.a);
+                            const lg=s.a>180?1:0;
+                            return <path key={i} d={`M55 55 L${x1.toFixed(1)} ${y1.toFixed(1)} A44 44 0 ${lg} 1 ${x2.toFixed(1)} ${y2.toFixed(1)} Z`} fill={s.color} opacity={0.88}/>;
+                          })}
+                        </svg>
+                        {/* Legend below pie */}
+                        <div style={{display:"flex",gap:12,flexWrap:"wrap",justifyContent:"center"}}>
+                          {slices.map((s,i)=>(
+                            <div key={i} style={{display:"flex",alignItems:"center",gap:5}}>
+                              <span style={{fontSize:12,color:s.color}}>●</span>
+                              <span style={{fontSize:10,color:T.text1}}>{s.label}</span>
+                              <span style={{fontSize:10,color:s.color,fontWeight:700}}>{Math.round(s.val/pieTotal*100)}%</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                    </>) : (
+                      <div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",color:T.text2,fontSize:12,textAlign:"center"}}>
+                        Enter interest rate and portfolio % to see your breakdown
+                      </div>
+                    )}
                   </div>
-                )}
-                {/* Add to Roadmap — bottom right */}
-                {canSave && !isLocked && (
-                  <div style={{display:"flex",justifyContent:"flex-end",flexShrink:0,marginTop:4}}>
-                    <button onClick={saveHome} style={{padding:"8px 20px",fontSize:12,fontWeight:700,color:"#fff",background:"rgba(129,140,248,0.25)",border:"1px solid #818cf8",borderRadius:6,cursor:"pointer"}}>
-                      ➕ Add Age {targetAge} to Roadmap
-                    </button>
-                  </div>
-                )}
+                </div>
               </>
               );
             })()}

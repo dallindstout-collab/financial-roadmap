@@ -947,14 +947,18 @@ export default function App() {
   const [active, setActive]   = useState("roadmap");
   const [navExpanded, setNavExpanded] = useState(false);
   const [state, setState]     = useState(INIT_STATE);
+  const [zoom, setZoom] = useState(() => Math.min(window.innerWidth / 1440, window.innerHeight / 900));
+  useEffect(() => {
+    const calc = () => setZoom(Math.min(window.innerWidth / 1440, window.innerHeight / 900));
+    window.addEventListener("resize", calc);
+    return () => window.removeEventListener("resize", calc);
+  }, []);
 
   return (
     <>
       <style>{CSS}</style>
-      <div style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden" }}>
-        <TickerBar />
-        <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
-        {/* Sidebar */}
+      <div style={{ position:"fixed", top:0, left:0, width:`${100/zoom}vw`, height:`${100/zoom}vh`, transformOrigin:"top left", transform:`scale(${zoom})`, overflow:"hidden", display:"flex", flexDirection:"row" }}>
+        {/* Sidebar — full height, left side */}
         <div onMouseEnter={e => { setNavExpanded(true); const el = e.currentTarget; el.classList.remove('nav-shimmer'); void el.offsetWidth; el.classList.add('nav-shimmer'); setTimeout(()=>el.classList.remove('nav-shimmer'),1400); }} onMouseLeave={() => setNavExpanded(false)}
           style={{ width: navExpanded ? 200 : 48, flexShrink: 0, background: "#0a0a10", borderRight: `1px solid ${T.border}`, display: "flex", flexDirection: "column", transition: "width 0.2s", overflow: "hidden" }}>
           <div style={{ padding: navExpanded ? "16px 14px 12px" : "16px 8px 12px", borderBottom: `1px solid ${T.border}`, flexShrink: 0 }}>
@@ -985,9 +989,10 @@ export default function App() {
             })}
           </nav>
         </div>
-
-        {/* Main */}
-        <main style={{ flex: 1, overflow: "hidden", position: "relative", background: "#0a0a12" }}>
+        {/* Right column: ticker + content */}
+        <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
+          <TickerBar />
+          <main style={{ flex: 1, overflow: "hidden", position: "relative", background: "#0a0a12" }}>
           {active === "roadmap" && <RoadmapPanel state={state} setState={setState} />}
           {active !== "roadmap" && (
             <div style={{ padding: "2rem", color: T.text1 }}>
@@ -995,8 +1000,8 @@ export default function App() {
               <p style={{ color: T.text2 }}>Coming soon. Build your roadmap in the Roadmap tab.</p>
             </div>
           )}
-        </main>
-        </div>
+          </main>
+        </div>{/* end right col */}
       </div>
     </>
   );

@@ -155,6 +155,7 @@ const NAV = [
 ];
 
 const INIT_STATE = {
+  savedFhList: [],
   entries: [], startYear: new Date().getFullYear(),
   setupForm: { year: String(new Date().getFullYear()), age: "", salary: "" },
   contrib401k: [], match401k: { enabled: false, matchPct: 100, upToPct: 5 },
@@ -203,7 +204,8 @@ function RoadmapPanel({ state, setState }) {
   const [draftAssumptions, setDraftAssumptions] = useState(null);
   const [showFutureHome, setShowFutureHome] = useState(false);
   const [fhForm, setFhForm] = useState({ rate: "", portPct: "", equityPct: "", dti: "", savingsPct: "", targetAge: "" });
-  const [savedFhList, setSavedFhList] = useState([]);
+  const savedFhList = state.savedFhList || [];
+  const setSavedFhList = v => setState(s => ({ ...s, savedFhList: typeof v==='function' ? v(s.savedFhList||[]) : v }));
   const [activeFhIdx, setActiveFhIdx] = useState(null);
   const [editingFhIdx, setEditingFhIdx] = useState(null);
   const [rangeStart, setRangeStart] = useState(0);
@@ -240,11 +242,12 @@ function RoadmapPanel({ state, setState }) {
   const sliceEnd   = Math.max(sliceStart + 1, Math.min(chartData.length, Math.round(chartData.length * rangeEnd / 100)));
   const sliced = chartData.slice(sliceStart, sliceEnd);
   const mortSliced = mortgageData.filter(d => sliced.some(s => s.year === d.year));
-  // Set right slider to age 65 on first data load
+  // Set right slider to startAge + 20 on first data load
   useEffect(() => {
-    if (chartData.length > 0) {
-      const i65 = chartData.findIndex(d => (d.age||0) >= 65);
-      if (i65 > 0) setRangeEnd(Math.round(i65 / chartData.length * 100));
+    if (chartData.length > 0 && startAge) {
+      const targetAge20 = startAge + 20;
+      const i20 = chartData.findIndex(d => (d.age||0) >= targetAge20);
+      if (i20 > 0) setRangeEnd(Math.round(i20 / chartData.length * 100));
     }
   }, [hasStart]); // eslint-disable-line
   const xInt = Math.max(0, Math.floor((sliceEnd - sliceStart) / 5) - 1);
@@ -260,7 +263,7 @@ function RoadmapPanel({ state, setState }) {
     setShowSetup(false); setSetupErr("");
   };
 
-  const resetAll = () => { setState(INIT_STATE); setShowSetup(true); setActiveYear(null); setChartRange(30); setSavedFhList([]); setActiveFhIdx(null); setShowFutureHome(false); setRangeStart(0); setRangeEnd(100); };
+  const resetAll = () => { setState(INIT_STATE); setShowSetup(true); setActiveYear(null); setChartRange(30); setActiveFhIdx(null); setShowFutureHome(false); setRangeStart(0); setRangeEnd(100); };
 
   const commitEvent = () => {
     if (!activeYear) return;
@@ -347,7 +350,7 @@ function RoadmapPanel({ state, setState }) {
         <div style={{ flex: 1, overflow: "auto" }}>
           <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 1100 }}>
             <thead><tr>
-              <TH c="Year" /><TH c="Age" right /><TH c="Salary" right /><TH c="401k/yr" right /><TH c="401k Bal" right /><TH c="Invest/yr" right /><TH c="Invest Bal" right /><TH c="Net Worth" right /><TH c="Loan Bal" right /><TH c="Interest" right /><TH c="Mkt Value" right /><TH c="Equity" right /><TH c="Retired" right />
+              <TH c="Year" /><TH c="Age" right /><TH c="Salary" right /><TH c="401k/yr" right /><TH c="401k Bal" right /><TH c="Invest/yr" right /><TH c="Invest Bal" right /><TH c="Net Worth" right /><TH c="Savings" right /><TH c="Loan Bal" right /><TH c="Interest" right /><TH c="Mkt Value" right /><TH c="Equity" right /><TH c="Retired" right />
             </tr></thead>
             <tbody>
               {rows.map((r, i) => (
@@ -360,6 +363,7 @@ function RoadmapPanel({ state, setState }) {
                   <TD v={r.investAnnual > 0 ? fmt(r.investAnnual) : "—"} color={T.gold} />
                   <TD v={r.invest != null ? fmt(r.invest) : "—"} color={r.invest < 0 ? T.red : T.gold} />
                   <TD v={r.netWorth != null ? fmt(r.netWorth) : "—"} color="#a78bfa" />
+                  <TD v={r.savBal > 0 ? fmt(r.savBal) : "—"} color="#34d399" />
                   <TD v={r.paidOff ? "Paid off" : r.balance > 0 ? fmt(r.balance) : "—"} color={r.paidOff ? T.green : T.gold} />
                   <TD v={r.interest > 0 ? fmt(r.interest) : "—"} color={T.red} />
                   <TD v={r.mktVal > 0 ? fmt(r.mktVal) : "—"} color="#a78bfa" />
@@ -379,15 +383,11 @@ function RoadmapPanel({ state, setState }) {
       {/* LEFT: charts */}
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", padding: "0.5rem", minWidth: 0, background: "rgba(6,6,14,0.82)" }}>
         {/* Top bar — left: spreadsheet+assumptions, right: edit+reset */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6, flexShrink: 0 }}>
-          <div style={{ display: "flex", gap: 6 }}>
-            <button onClick={() => setShowSpreadsheet(true)} style={{ ...btnStyle(false, T.gold), fontSize: 11 }}>📊 Spreadsheet</button>
-            <button onClick={() => { setShowAssumptions(s => { if(!s) setDraftAssumptions({...assumptions}); return !s; }); }} style={{ ...btnStyle(showAssumptions, "#a78bfa"), fontSize: 11 }}>⚙️ Assumptions</button>
-          </div>
-          <div style={{ display: "flex", gap: 6 }}>
-            <button onClick={() => setShowSetup(true)} style={{ ...btnStyle(false, T.accent), fontSize: 11 }}>✏️ Edit Start</button>
-            <button onClick={resetAll} style={{ ...btnStyle(false, T.text1), fontSize: 11 }}>↺ Reset</button>
-          </div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 12, marginBottom: 6, flexShrink: 0 }}>
+          <button onClick={() => setShowSpreadsheet(true)} style={{ ...btnStyle(false, T.gold), fontSize: 11 }}>📊 Spreadsheet</button>
+          <button onClick={() => { setShowAssumptions(s => { if(!s) setDraftAssumptions({...assumptions}); return !s; }); }} style={{ ...btnStyle(showAssumptions, "#a78bfa"), fontSize: 11 }}>⚙️ Assumptions</button>
+          <button onClick={() => setShowSetup(true)} style={{ ...btnStyle(false, T.accent), fontSize: 11 }}>✏️ Edit Start</button>
+          <button onClick={resetAll} style={{ ...btnStyle(false, T.text1), fontSize: 11 }}>↺ Reset</button>
         </div>
 
         {/* Assumptions panel */}
@@ -433,34 +433,6 @@ function RoadmapPanel({ state, setState }) {
         )}
 
 
-
-        {/* Dual range slider */}
-        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "2px 0", flexShrink: 0 }}>
-          <span style={{ fontSize: 11, color: T.text2, minWidth: 44, textAlign: "right" }}>
-            {sliced.length > 0 ? `Age ${sliced[0]?.age ?? (startAge||startYear)}` : (startAge||startYear)}
-          </span>
-          <div className="dual-range-wrap" style={{ flex: 1 }}>
-            <div className="dual-range-track"/>
-            <div className="dual-range-fill" style={{ left:`${rangeStart}%`, width:`${rangeEnd-rangeStart}%` }}/>
-            {/* Visible grabber handles */}
-            <div style={{ position:"absolute", left:`calc(${rangeStart}% - 9px)`, top:"50%", transform:"translateY(-50%)", width:18, height:18, borderRadius:"50%", background:"#818cf8", border:"2.5px solid #fff", boxShadow:"0 1px 5px rgba(0,0,0,0.5)", pointerEvents:"none", zIndex:5, cursor:"grab", display:"flex", alignItems:"center", justifyContent:"center" }}>
-              <div style={{ width:6, height:6, borderLeft:"1.5px solid rgba(255,255,255,0.7)", borderRight:"1.5px solid rgba(255,255,255,0.7)", borderRadius:1 }}/>
-            </div>
-            <div style={{ position:"absolute", left:`calc(${rangeEnd}% - 9px)`, top:"50%", transform:"translateY(-50%)", width:18, height:18, borderRadius:"50%", background:T.accent, border:"2.5px solid #fff", boxShadow:"0 1px 5px rgba(0,0,0,0.5)", pointerEvents:"none", zIndex:5, cursor:"grab", display:"flex", alignItems:"center", justifyContent:"center" }}>
-              <div style={{ width:6, height:6, borderLeft:"1.5px solid rgba(255,255,255,0.7)", borderRight:"1.5px solid rgba(255,255,255,0.7)", borderRadius:1 }}/>
-            </div>
-            {/* Invisible inputs for drag interaction */}
-            <input type="range" min={0} max={100} value={rangeStart}
-              onChange={e => setRangeStart(Math.min(+e.target.value, rangeEnd - 2))}
-              style={{ zIndex: rangeStart > 90 ? 4 : 3 }}/>
-            <input type="range" min={0} max={100} value={rangeEnd}
-              onChange={e => setRangeEnd(Math.max(+e.target.value, rangeStart + 2))}
-              style={{ zIndex: rangeStart > 90 ? 3 : 4 }}/>
-          </div>
-          <span style={{ fontSize: 11, color: T.accent, minWidth: 44 }}>
-            {sliced.length > 0 ? `Age ${sliced[sliced.length-1]?.age ?? ""}` : ""}
-          </span>
-        </div>
 
         {/* 2x2 chart grid */}
         <div style={{ flex: 1, display: "grid", gridTemplateColumns: "1fr 1fr", gridTemplateRows: "1fr 1fr", gap: 6, minHeight: 0 }}>
@@ -744,6 +716,31 @@ function RoadmapPanel({ state, setState }) {
         </div>
 
 
+        {/* Dual range slider — below plots */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0", flexShrink: 0 }}>
+          <span style={{ fontSize: 11, color: T.text2, minWidth: 44, textAlign: "right" }}>
+            {sliced.length > 0 ? `Age ${sliced[0]?.age ?? (startAge||startYear)}` : (startAge||startYear)}
+          </span>
+          <div className="dual-range-wrap" style={{ flex: 1 }}>
+            <div className="dual-range-track"/>
+            <div className="dual-range-fill" style={{ left:`${rangeStart}%`, width:`${rangeEnd-rangeStart}%` }}/>
+            <div style={{ position:"absolute", left:`calc(${rangeStart}% - 9px)`, top:"50%", transform:"translateY(-50%)", width:18, height:18, borderRadius:"50%", background:"#818cf8", border:"2.5px solid #fff", boxShadow:"0 1px 5px rgba(0,0,0,0.5)", pointerEvents:"none", zIndex:5, display:"flex", alignItems:"center", justifyContent:"center" }}>
+              <div style={{ width:6, height:6, borderLeft:"1.5px solid rgba(255,255,255,0.7)", borderRight:"1.5px solid rgba(255,255,255,0.7)", borderRadius:1 }}/>
+            </div>
+            <div style={{ position:"absolute", left:`calc(${rangeEnd}% - 9px)`, top:"50%", transform:"translateY(-50%)", width:18, height:18, borderRadius:"50%", background:T.accent, border:"2.5px solid #fff", boxShadow:"0 1px 5px rgba(0,0,0,0.5)", pointerEvents:"none", zIndex:5, display:"flex", alignItems:"center", justifyContent:"center" }}>
+              <div style={{ width:6, height:6, borderLeft:"1.5px solid rgba(255,255,255,0.7)", borderRight:"1.5px solid rgba(255,255,255,0.7)", borderRadius:1 }}/>
+            </div>
+            <input type="range" min={0} max={100} value={rangeStart}
+              onChange={e => setRangeStart(Math.min(+e.target.value, rangeEnd - 2))}
+              style={{ zIndex: rangeStart > 90 ? 4 : 3 }}/>
+            <input type="range" min={0} max={100} value={rangeEnd}
+              onChange={e => setRangeEnd(Math.max(+e.target.value, rangeStart + 2))}
+              style={{ zIndex: rangeStart > 90 ? 3 : 4 }}/>
+          </div>
+          <span style={{ fontSize: 11, color: T.accent, minWidth: 44 }}>
+            {sliced.length > 0 ? `Age ${sliced[sliced.length-1]?.age ?? ""}` : ""}
+          </span>
+        </div>
       </div>
 
       {/* RIGHT: table */}

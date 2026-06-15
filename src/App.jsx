@@ -12,8 +12,15 @@ const T = {
 };
 
 const fmt  = v => "$" + Math.round(v).toLocaleString();
-const fmtK = v => v >= 1e6 ? "$"+(v/1e6).toFixed(1)+"M" : v >= 1000 ? "$"+(Math.round(v/1000))+"k" : "$"+Math.round(v);
+const fmtK    = v => v >= 1e6 ? "$"+(v/1e6).toFixed(1)+"M" : v >= 1000 ? "$"+(Math.round(v/1000))+"k" : "$"+Math.round(v);
+const fmtFull = v => "$" + Math.round(v).toLocaleString();
 
+
+const BG = {
+  roadmap: "https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?w=1920&q=80",
+  budget:  "https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?w=1920&q=80",
+  profile: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=1920&q=80",
+};
 function InPlotLegend({ items }) {
   return ({ xAxisMap, margin }) => {
     const plotLeft = (margin?.left || 0) + (Object.values(xAxisMap || {})[0]?.x || 70) + 8;
@@ -67,11 +74,12 @@ function projectedSalaryAtYear(entries, growthRate, year) {
   return base.salary * Math.pow(1 + growthRate / 100, yrs);
 }
 
-function buildChartData(entries, growthRate, investReturn, withdrawalRate, startYear, contrib401k, match401k, investments, lifeEvents, retireYear, retireEnabled) {
+function buildChartData(entries, growthRate, investReturn, savingsReturn, withdrawalRate, startYear, contrib401k, match401k, investments, savingsList, lifeEvents, retireYear, retireEnabled) {
   if (!entries.length) return [];
   const pts = [];
-  let k401 = 0, invest = 0;
-  for (let y = startYear; y <= startYear + 99; y++) {
+  let k401 = 0, invest = 0, savBal = 0;
+  const sa = entries[0]?.startAge || null; const careerEnd = sa ? startYear + Math.max(0, 100 - sa) : startYear + 99;
+  for (let y = startYear; y <= careerEnd; y++) {
     const sal = projectedSalaryAtYear(entries, growthRate, y) || 0;
     const isRetired = retireEnabled && retireYear && y >= retireYear;
     const isRetireYear = retireEnabled && retireYear && y === retireYear;
@@ -91,8 +99,11 @@ function buildChartData(entries, growthRate, investReturn, withdrawalRate, start
       k401 = (k401 + k4Annual) * k401Growth;
     }
     invest = (invest + invAnnual + extraInvest - extraExpense) * (1 + investReturn / 100);
+    const savPct = (savingsList||[]).length ? ([...(savingsList||[])].reverse().find(s=>s.year<=y)?.pct||0) : 0;
+    const savAnnual = isRetired ? 0 : sal * savPct / 100;
+    savBal = (savBal + savAnnual) * (1 + savingsReturn / 100);
     const anchor = entries.find(e => e.year === y);
-    pts.push({ year: y, salary: Math.round(sal), k401: Math.round(k401), k401Annual: Math.round(k4Annual), invest: Math.round(invest), investAnnual: Math.round(invAnnual), k401Pct: k4, investPct: inv, isRetired, drawdown: Math.round(drawdown), isEvent: !!anchor });
+    pts.push({ year: y, salary: Math.round(sal), k401: Math.round(k401), k401Annual: Math.round(k4Annual), invest: Math.round(invest), investAnnual: Math.round(invAnnual), k401Pct: k4, investPct: inv, isRetired, drawdown: Math.round(drawdown), isEvent: !!anchor, savBal: Math.round(savBal), savAnnual: Math.round(savAnnual||0), savPct: savPct||0 });
   }
   return pts;
 }
@@ -147,9 +158,9 @@ const INIT_STATE = {
   entries: [], startYear: new Date().getFullYear(),
   setupForm: { year: String(new Date().getFullYear()), age: "", salary: "" },
   contrib401k: [], match401k: { enabled: false, matchPct: 100, upToPct: 5 },
-  mortgages: [], investments: [], lifeEvents: [],
+  mortgages: [], investments: [], savings: [], lifeEvents: [],
   retireYear: null, retireEnabled: false,
-  assumptions: { salaryGrowth: 3, investReturn: 7, inflation: 3, homeAppreciation: 3, withdrawalRate: 4, mortgageTerm: 30, capGainsPct: 20, buySellPct: 10 },
+  assumptions: { salaryGrowth: 3, investReturn: 7, inflation: 3, homeAppreciation: 3, withdrawalRate: 4, mortgageTerm: 30, capGainsPct: 20, buySellPct: 10, savingsReturn: 4.5 },
 };
 
 function Tip({ active, payload }) {
@@ -176,7 +187,7 @@ function PctTip({ active, payload }) {
 
 function ChartCard({ title, children }) {
   return (
-    <div style={{ background: "rgba(255,255,255,0.04)", border: `1px solid ${T.border}`, borderRadius: 10, padding: "0.6rem", display: "flex", flexDirection: "column" }}>
+    <div style={{ background: "rgba(6,6,16,0.72)", border: `1px solid ${T.border}`, borderRadius: 10, padding: "0.6rem", display: "flex", flexDirection: "column" }}>
       <div style={{ fontSize: 11, color: T.text1, letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 6, textAlign: "center" }}>{title}</div>
       {children}
     </div>
@@ -191,17 +202,19 @@ function RoadmapPanel({ state, setState }) {
   const [showAssumptions, setShowAssumptions] = useState(false);
   const [draftAssumptions, setDraftAssumptions] = useState(null);
   const [showFutureHome, setShowFutureHome] = useState(false);
-  const [fhForm, setFhForm] = useState({ rate: "", portPct: "", equityPct: "", dti: "", targetAge: "" });
+  const [fhForm, setFhForm] = useState({ rate: "", portPct: "", equityPct: "", dti: "", savingsPct: "", targetAge: "" });
   const [savedFhList, setSavedFhList] = useState([]);
   const [activeFhIdx, setActiveFhIdx] = useState(null);
   const [editingFhIdx, setEditingFhIdx] = useState(null);
   const [rangeStart, setRangeStart] = useState(0);
-  const [rangeEnd,   setRangeEnd]   = useState(60); // ~age 70 for average start
-  const [eventForm, setEventForm]   = useState({ pct: "", salary: "", k401Pct: "", matchPct: "", investPct: "", homePrice: "", mortgageRate: "", portPct: "", dtiPct: "", useEquity: false, lifeLabel: "", lifeAmount: "", lifeType: "expense", retireToggle: false });
+  const [rangeEnd,   setRangeEnd]   = useState(100);
 
-  const { entries, startYear, setupForm, contrib401k, match401k, mortgages, investments, lifeEvents, retireYear, retireEnabled, assumptions } = state;
+  const [eventForm, setEventForm]   = useState({ pct: "", salary: "", k401Pct: "", matchPct: "", investPct: "", savingsPct: "", homePrice: "", mortgageRate: "", portPct: "", dtiPct: "", useEquity: false, lifeLabel: "", lifeAmount: "", lifeType: "expense", retireToggle: false });
+
+  const { entries, startYear, setupForm, contrib401k, match401k, mortgages, investments, savings, lifeEvents, retireYear, retireEnabled, assumptions } = state;
   const set = (key, val) => setState(s => ({ ...s, [key]: val }));
   const setAssumptions = patch => setState(s => ({ ...s, assumptions: { ...s.assumptions, ...patch } }));
+  const setSavings = v => setState(s => ({ ...s, savings: typeof v==="function" ? v(s.savings) : v }));
 
   const hasStart = entries.length > 0;
   const firstEntry = hasStart ? entries[0] : null;
@@ -211,7 +224,7 @@ function RoadmapPanel({ state, setState }) {
 
   const projForYear = y => projectedSalaryAtYear(entries, assumptions.salaryGrowth, y);
 
-  const chartDataRaw = hasStart ? buildChartData(entries, assumptions.salaryGrowth, assumptions.investReturn, assumptions.withdrawalRate, startYear, contrib401k, match401k, investments, lifeEvents, retireYear, retireEnabled) : [];
+  const chartDataRaw = hasStart ? buildChartData(entries, assumptions.salaryGrowth, assumptions.investReturn, assumptions.savingsReturn||4, assumptions.withdrawalRate, startYear, contrib401k, match401k, investments, savings, lifeEvents, retireYear, retireEnabled) : [];
   const mortgageData = buildMortgageData(mortgages, startYear, maxYear, lifeEvents, assumptions.homeAppreciation).map(pt => ({
     ...pt,
     age: startAge ? startAge + (pt.year - startYear) : null
@@ -227,6 +240,13 @@ function RoadmapPanel({ state, setState }) {
   const sliceEnd   = Math.max(sliceStart + 1, Math.min(chartData.length, Math.round(chartData.length * rangeEnd / 100)));
   const sliced = chartData.slice(sliceStart, sliceEnd);
   const mortSliced = mortgageData.filter(d => sliced.some(s => s.year === d.year));
+  // Set right slider to age 65 on first data load
+  useEffect(() => {
+    if (chartData.length > 0) {
+      const i65 = chartData.findIndex(d => (d.age||0) >= 65);
+      if (i65 > 0) setRangeEnd(Math.round(i65 / chartData.length * 100));
+    }
+  }, [hasStart]); // eslint-disable-line
   const xInt = Math.max(0, Math.floor((sliceEnd - sliceStart) / 5) - 1);
   const xT = { fill: T.text1, fontSize: 11 };
   const axP = { tickLine: false, axisLine: false };
@@ -240,7 +260,7 @@ function RoadmapPanel({ state, setState }) {
     setShowSetup(false); setSetupErr("");
   };
 
-  const resetAll = () => { setState(INIT_STATE); setShowSetup(true); setActiveYear(null); setChartRange(30); setSavedFhList([]); setActiveFhIdx(null); setShowFutureHome(false); setRangeStart(0); setRangeEnd(60); };
+  const resetAll = () => { setState(INIT_STATE); setShowSetup(true); setActiveYear(null); setChartRange(30); setSavedFhList([]); setActiveFhIdx(null); setShowFutureHome(false); setRangeStart(0); setRangeEnd(100); };
 
   const commitEvent = () => {
     if (!activeYear) return;
@@ -257,6 +277,8 @@ function RoadmapPanel({ state, setState }) {
     if (!isNaN(mPct) && mPct >= 0) set("match401k", { ...match401k, upToPct: mPct, enabled: true });
     const iPct = parseFloat(eventForm.investPct);
     if (!isNaN(iPct) && iPct >= 0) set("investments", [...investments.filter(i => i.year !== activeYear), { year: activeYear, pct: iPct, ret: assumptions.investReturn }].sort((a, b) => a.year - b.year));
+    const sPct = parseFloat(eventForm.savingsPct);
+    if (!isNaN(sPct) && sPct >= 0) setSavings(prev => [...prev.filter(s => s.year !== activeYear), { year: activeYear, pct: sPct }].sort((a,b)=>a.year-b.year));
     const hp = parseFloat(eventForm.homePrice), hr = parseFloat(eventForm.mortgageRate);
     if (!isNaN(hp) && hp > 0 && !isNaN(hr) && hr > 0) {
       const isSecond = mortgages.some(m => m.year < activeYear);
@@ -353,9 +375,9 @@ function RoadmapPanel({ state, setState }) {
   }
 
   return (
-    <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "row", overflow: "hidden", background: "#0a0a12" }}>
+    <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "row", overflow: "hidden", background: "transparent" }}>
       {/* LEFT: charts */}
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", padding: "0.5rem", minWidth: 0 }}>
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", padding: "0.5rem", minWidth: 0, background: "rgba(6,6,14,0.82)" }}>
         {/* Top bar — left: spreadsheet+assumptions, right: edit+reset */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6, flexShrink: 0 }}>
           <div style={{ display: "flex", gap: 6 }}>
@@ -372,7 +394,7 @@ function RoadmapPanel({ state, setState }) {
         {showAssumptions && draftAssumptions && (
           <div style={{ position: "absolute", top: 40, left: 0, zIndex: 20, background: T.bg2, border: `1px solid rgba(167,139,250,0.4)`, borderRadius: 10, padding: "14px 18px", minWidth: 300, boxShadow: "0 8px 32px rgba(0,0,0,0.7)" }}>
             <div style={{ fontSize: 13, fontWeight: 700, color: "#a78bfa", marginBottom: 10 }}>⚙️ Model Assumptions</div>
-            {[["salaryGrowth","Salary Growth","~3% is typical"],["investReturn","Investment Return","~7% S&P500 historical"],["inflation","Inflation","~3% long-term avg"],["homeAppreciation","Home Appreciation","~3% historically"],["withdrawalRate","Retirement Withdrawal","~4% safe draw rate"]].map(([k,lbl,hint]) => (
+            {[["salaryGrowth","Salary Growth","~3% is typical"],["investReturn","Investment Return","~7% S&P500 historical"],["savingsReturn","Savings Rate","~4.5% money market / HYSA"],["inflation","Inflation","~3% long-term avg"],["homeAppreciation","Home Appreciation","~3% historically"],["withdrawalRate","Retirement Withdrawal","~4% safe draw rate"]].map(([k,lbl,hint]) => (
               <div key={k} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 11, color: "#fff" }}>{lbl}</div>
@@ -459,9 +481,9 @@ function RoadmapPanel({ state, setState }) {
 
           <ChartCard title="Home Ownership">
             {mortgages.length === 0 ? (
-              <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", color: T.text2, fontSize: 13, gap: 8 }}>
+              <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8, color: T.text2, textAlign: "center", padding: "0 1.5rem" }}>
                 <span style={{ fontSize: 28 }}>🏠</span>
-                <span>Click the 🏠 Add a Future Home Purchase button below to plot this graph</span>
+                <span style={{ fontSize: 12, lineHeight: 1.6 }}>This graph will populate once a home purchase is added. Click <strong style={{ color: "rgba(255,255,255,0.5)" }}>+ Add</strong> on any year in the Build Your Roadmap window.</span>
               </div>
             ) : (
               <ResponsiveContainer width="100%" height="100%">
@@ -488,8 +510,10 @@ function RoadmapPanel({ state, setState }) {
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
                   <XAxis dataKey="age" tick={xT} {...axP} interval={xInt} label={{ value: "Age", position: "insideBottom", offset: -2, fill: T.text2, fontSize: 11 }} />
                   <YAxis tickFormatter={fmtK} tick={xT} {...axP} width={70} />
-                  <Tooltip formatter={v => [fmtK(v), "Salary"]} labelFormatter={v => `Age ${v}`} contentStyle={{ background: "#0d0d14", border: `1px solid ${T.border}`, borderRadius: 8, fontSize: 12 }} />
-                  <Line type="monotone" dataKey="salary" stroke={T.accent} strokeWidth={2} dot={({cx,cy,payload})=>payload.isEvent?<circle key={cx} cx={cx} cy={cy} r={4} fill={T.accent} stroke="#0d0d14" strokeWidth={2}/>:<g key={cx}/>} activeDot={{r:5}}/>
+                  <Tooltip formatter={(v,n)=>[fmtK(v),n]} labelFormatter={v=>`Age ${v}`} contentStyle={{ background: "#0d0d14", border: `1px solid ${T.border}`, borderRadius: 8, fontSize: 12 }} />
+                  <Line type="monotone" dataKey="salary" name="Salary" stroke={T.accent} strokeWidth={2} dot={({cx,cy,payload})=>payload.isEvent?<circle key={cx} cx={cx} cy={cy} r={4} fill={T.accent} stroke="#0d0d14" strokeWidth={2}/>:<g key={cx}/>} activeDot={{r:5}}/>
+                  <Line type="monotone" dataKey="savBal" name="Savings" stroke="#34d399" strokeWidth={2} dot={false} activeDot={{r:4}}/>
+                  <Customized component={InPlotLegend({items:[{name:"Salary",color:T.accent},{name:"Savings",color:"#34d399"}]})}/>
                 </LineChart>
               </ResponsiveContainer>
             ) : (
@@ -499,13 +523,14 @@ function RoadmapPanel({ state, setState }) {
             )}
           </ChartCard>
 
-          <div style={{ gridColumn: 2, gridRow: 2, background: "rgba(255,255,255,0.04)", border: `1px solid ${T.border}`, borderRadius: 10, padding: "0.6rem", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+          <div style={{ gridColumn: 2, gridRow: 2, background: "rgba(6,6,16,0.72)", border: `1px solid ${T.border}`, borderRadius: 10, padding: "0.6rem", display: "flex", flexDirection: "column", overflow: "hidden" }}>
             {!showFutureHome ? (
-              <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10 }}>
-                <button onClick={() => setShowFutureHome(true)} style={{ padding: "10px 24px", fontSize: 14, fontWeight: 700, color: "#fff", background: "rgba(129,140,248,0.2)", border: "1px solid #818cf8", borderRadius: 8, cursor: "pointer" }}>
-                  🏠 Add a Future Home Purchase
-                </button>
-                <span style={{ fontSize: 11, color: T.text2, textAlign: "center", maxWidth: 420, lineHeight: 1.5 }}>Make sure all previous year&apos;s events have been added in the Roadmap window to the right!</span>
+              <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8, padding: "0 2rem" }}>
+                <span style={{ fontSize: 22 }}>🏠</span>
+                <span style={{ fontSize: 13, fontWeight: 700, color: "rgba(255,255,255,0.6)", textAlign: "center" }}>Add a Home Purchase</span>
+                <span style={{ fontSize: 12, color: T.text2, textAlign: "center", lineHeight: 1.6, maxWidth: 340 }}>
+                  Click <strong style={{ color: "rgba(255,255,255,0.5)" }}>+ Add</strong> on any year in the Build Your Roadmap window, then tap <strong style={{ color: "#818cf8" }}>🏠 Add Home Purchase</strong> to get started.
+                </span>
               </div>
             ) : (()=>{
               const currYr = new Date().getFullYear();
@@ -536,6 +561,9 @@ function RoadmapPanel({ state, setState }) {
               const n = mortTerm * 12;
               const pmt = dti > 0 && (snapAtTarget?.salary||0) > 0 ? (snapAtTarget.salary) * dti / 100 / 12 : 0;
               const maxLoan = (mr > 0 && pmt > 0) ? pmt*(Math.pow(1+mr,n)-1)/(mr*Math.pow(1+mr,n)) : 0;
+              const savBal2 = Math.max(0, snapAtTarget?.savBal||0);
+              const savingsUsedPct = Math.max(0, parseFloat(displayForm.savingsPct)||0);
+              const savAmt = savBal2 * savingsUsedPct / 100;
               const netPort = Math.max(0, portAmt - capGains);
               // Loan is in future dollars — deflate to today's purchasing power
               // Portfolio and equity are already in real/today's terms
@@ -543,8 +571,9 @@ function RoadmapPanel({ state, setState }) {
               const inflFactor = Math.pow(1 + (assumptions.inflation||3) / 100, yearsUntil);
               const maxLoanToday = yearsUntil > 0 ? maxLoan / inflFactor : maxLoan;
               // Max price in today's dollars
-              const grossToday = netPort + usedEq + maxLoanToday;
-              const buySell = grossToday * (assumptions.buySellPct||10) / 100;
+              const grossToday = netPort + usedEq + savAmt + maxLoanToday;
+              const buySellRate = (hasPriorHome ? 1 : 0.5) * (assumptions.buySellPct||10) / 100;
+              const buySell = grossToday * buySellRate;
               const maxPrice = Math.max(0, Math.round(grossToday - buySell));
               // Nominal price for saving to roadmap (loan in future $)
               const grossNominal = netPort + usedEq + maxLoan;
@@ -567,6 +596,7 @@ function RoadmapPanel({ state, setState }) {
                 ? lockedSnap.savedPieSlices
                 : [
                     { val: netPort,      color: T.gold,    label: "Portfolio" },
+                    { val: savAmt,       color: "#34d399", label: "Savings" },
                     { val: usedEq,       color: "#7dd3fc", label: "Equity" },
                     { val: maxLoanToday, color: T.accent,  label: "Loan (today $)" },
                     { val: buySell,      color: T.red,     label: "Fees" },
@@ -578,6 +608,7 @@ function RoadmapPanel({ state, setState }) {
               const saveHome = () => {
                 const newEvents = [...(state.lifeEvents||[]).filter(e=>!(e.year===targetYr&&(e.label==="Home down payment"||e.label==="Unused equity reinvested")))];
                 if(portAmt>0) newEvents.push({year:targetYr,label:"Home down payment",amount:portAmt,type:"expense"});
+                if(savAmt>0) newEvents.push({year:targetYr,label:"Savings used for home",amount:savAmt,type:"savings-used"});
                 if(unusedEq>500) newEvents.push({year:targetYr,label:"Unused equity reinvested",amount:unusedEq,type:"extra-invest"});
                 // Use maxLoan as the loan amount: downPct = (price - loan) / price
               const loanDownPct = maxPriceNominal > 0 ? Math.max(0, Math.min(100, (maxPriceNominal - maxLoan) / maxPriceNominal * 100)) : downPct;
@@ -596,7 +627,7 @@ function RoadmapPanel({ state, setState }) {
                   setActiveFhIdx(newList.length - 1);
                   return newList;
                 });
-                setFhForm({ rate: "", portPct: "", equityPct: "", dti: "", targetAge: "" });
+                setFhForm({ rate: "", portPct: "", equityPct: "", dti: "", savingsPct: "", targetAge: "" });
               };
               return (<>
                 {/* ROW 0: Tabs */}
@@ -607,10 +638,7 @@ function RoadmapPanel({ state, setState }) {
                       🏠 Age {p.targetAge} — {fmtK(p.savedMaxPrice||0)}
                     </button>
                   ))}
-                  <button onClick={()=>{setActiveFhIdx(null);setFhForm({rate:"",portPct:"",equityPct:"",dti:"",targetAge:""});}}
-                    style={{fontSize:10,padding:"3px 10px",borderRadius:5,cursor:"pointer",border:`1px solid ${activeFhIdx===null&&savedFhList.length>0?"#4ade80":T.border}`,background:activeFhIdx===null&&savedFhList.length>0?"rgba(74,222,128,0.15)":"transparent",color:activeFhIdx===null&&savedFhList.length>0?"#4ade80":T.text2,whiteSpace:"nowrap",flexShrink:0}}>
-                    {savedFhList.length>0?"+ Add Another":"🏠 Future Home"}
-                  </button>
+
                   <div style={{flex:1}}/>
                   {isLocked && (
                     <button onClick={()=>{
@@ -625,7 +653,6 @@ function RoadmapPanel({ state, setState }) {
 
                 {/* ROW 1: Input fields across one row */}
                 {(() => {
-                  const earlyError = targetAge && startAge && targetAge < startAge;
                   const inp2 = (key, ph, opts={}) => (
                     <div style={{flex:1,minWidth:0}}>
                       <div style={{fontSize:9,color:T.text2,marginBottom:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{opts.label||ph}</div>
@@ -638,8 +665,6 @@ function RoadmapPanel({ state, setState }) {
                   );
                   return (
                     <div style={{display:"flex",gap:5,flexShrink:0}}>
-                      {inp2("targetAge", `${(startAge||30)+5}`, {label:"Target Age"})}
-                      {earlyError && <div style={{fontSize:9,color:"#f87171",alignSelf:"flex-end",paddingBottom:6,whiteSpace:"nowrap"}}>before start!</div>}
                       {inp2("rate",      "e.g. 6.5",            {label:"Interest Rate %", step:"0.1"})}
                       {inp2("portPct",   "0-100",               {label:"% Portfolio"})}
                       <div style={{flex:1,minWidth:0,opacity:hasPriorHome?1:0.35}}>
@@ -651,6 +676,7 @@ function RoadmapPanel({ state, setState }) {
                           style={{width:"100%",background:isLocked||!hasPriorHome?"rgba(255,255,255,0.04)":"#1a1a2a",border:`1px solid rgba(255,255,255,${isLocked||!hasPriorHome?"0.06":"0.12"})`,borderRadius:5,color:(isLocked||!hasPriorHome)?"rgba(255,255,255,0.35)":"#f0f0f2",fontFamily:"inherit",fontSize:12,padding:"5px 7px",outline:"none"}}/>
                       </div>
                       {inp2("dti",       "e.g. 36",             {label:"DTI %", max:60})}
+                      {inp2("savingsPct", "e.g. 25",            {label:"% Savings"})}
 
                     </div>
                   );
@@ -677,15 +703,15 @@ function RoadmapPanel({ state, setState }) {
                 {(canShow || isLocked) && (
                   <div style={{background:"rgba(129,140,248,0.12)",border:"1px solid rgba(129,140,248,0.3)",borderRadius:8,padding:"6px 12px",flexShrink:0}}>
                     <div style={{fontSize:10,color:T.text2}}>Max Home Price <span style={{fontSize:9,color:"#818cf8"}}>(today&apos;s $)</span></div>
-                    <div style={{fontSize:26,fontWeight:800,color:"#fff"}}>{fmtK(pieMaxPrice)}</div>
+                    <div style={{fontSize:22,fontWeight:800,color:"#fff"}}>{fmtFull(pieMaxPrice)}</div>
                     {yearsUntil>0&&<div style={{fontSize:8,color:"rgba(255,255,255,0.3)"}}>Loan discounted {yearsUntil}yr @ {assumptions.inflation||3}% · nominal {fmtK(maxPriceNominal)}</div>}
                   </div>
                 )}
 
                 {/* ROW 4: Pie chart centered + legend below */}
                 {(canShow || isLocked) && slices.length > 0 && (
-                  <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:6,overflow:"hidden",minHeight:0}}>
-                    <svg width={375} height={375} viewBox="0 0 110 110">
+                  <div style={{flex:1,display:"flex",flexDirection:"row",alignItems:"center",gap:16,overflow:"hidden",minHeight:0}}>
+                    <svg width={275} height={275} viewBox="0 0 110 110" style={{flexShrink:0}}>
                       {slices.map((s,i)=>{
                         if(s.a<0.5) return null;
                         if(s.a>=359.9) return <circle key={i} cx={55} cy={55} r={44} fill={s.color} opacity={0.9}/>;
@@ -695,12 +721,14 @@ function RoadmapPanel({ state, setState }) {
                         return <path key={i} d={`M55 55 L${x1.toFixed(1)} ${y1.toFixed(1)} A44 44 0 ${lg} 1 ${x2.toFixed(1)} ${y2.toFixed(1)} Z`} fill={s.color} opacity={0.88}/>;
                       })}
                     </svg>
-                    <div style={{display:"flex",gap:14,flexWrap:"wrap",justifyContent:"center"}}>
+                    <div style={{display:"flex",flexDirection:"column",gap:10,justifyContent:"center"}}>
                       {slices.map((s,i)=>(
-                        <div key={i} style={{display:"flex",alignItems:"center",gap:5}}>
-                          <div style={{width:10,height:10,borderRadius:2,background:s.color,flexShrink:0}}/>
-                          <span style={{fontSize:11,color:T.text1}}>{s.label}</span>
-                          <span style={{fontSize:12,color:s.color,fontWeight:700,marginLeft:2}}>{Math.round(s.val/pieTotal*100)}%</span>
+                        <div key={i} style={{display:"flex",alignItems:"baseline",gap:8}}>
+                          <span style={{fontSize:14,color:s.color,lineHeight:1,flexShrink:0}}>●</span>
+                          <div>
+                            <div style={{fontSize:12,color:T.text1,fontWeight:600}}>{s.label}</div>
+                            <div style={{fontSize:11,color:s.color,fontWeight:700}}>{Math.round(s.val/pieTotal*100)}% · {fmtK(s.val)}</div>
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -730,7 +758,7 @@ function RoadmapPanel({ state, setState }) {
       </div>
 
       {/* RIGHT: table */}
-      <div style={{ width: 323, flexShrink: 0, display: "flex", flexDirection: "column", borderLeft: `1px solid ${T.border}`, overflow: "hidden" }}>
+      <div style={{ width: 323, flexShrink: 0, display: "flex", flexDirection: "column", borderLeft: `1px solid ${T.border}`, overflow: "hidden", background: "rgba(6,6,14,0.82)" }}>
         {/* Sticky header */}
         <div style={{ position: "sticky", top: 0, zIndex: 10, background: "#0d0d14", borderBottom: `1px solid ${T.border}`, flexShrink: 0 }}>
           <div style={{ padding: "7px 14px", display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -781,6 +809,7 @@ function RoadmapPanel({ state, setState }) {
                       ...f,
                       k401Pct:   existingC4   ? String(existingC4.pct)    : "",
                       investPct: existingInv  ? String(existingInv.pct)   : "",
+                      savingsPct: (() => { const s=[...savings].reverse().find(s=>s.year<=year); return s?String(s.pct):""; })(),
                       salary:    existingAnchor ? String(Math.round(existingAnchor.salary)) : "",
                       pct:       "",
                       retireToggle: !!(retireEnabled && retireYear === year),
@@ -820,6 +849,16 @@ function RoadmapPanel({ state, setState }) {
                       {year}{age ? ` · Age ${age}` : ""}{projForYear(year) ? ` · ${fmt(projForYear(year))}/yr` : ""}
                     </div>
 
+                    {/* 🏠 Add Home shortcut — opens Future Home Purchase panel pre-filled with this age */}
+                    <button onClick={() => {
+                      setActiveYear(null);
+                      setShowFutureHome(true);
+                      setActiveFhIdx(null);
+                      setFhForm(f => ({ ...f, targetAge: age ? String(age) : "" }));
+                    }} style={{ display:"flex", alignItems:"center", gap:6, width:"100%", padding:"7px 10px", marginBottom:4, background:"rgba(129,140,248,0.1)", border:"1px solid rgba(129,140,248,0.35)", borderRadius:6, color:"#818cf8", fontSize:12, fontWeight:600, cursor:"pointer", textAlign:"left", fontFamily:"inherit" }}>
+                      🏠 Add Home Purchase{age ? ` at Age ${age}` : ""}
+                    </button>
+
                     {!isFirst && (
                       <div style={rowStyle}>
                         <span style={labelStyle}>💵 Salary</span>
@@ -830,6 +869,10 @@ function RoadmapPanel({ state, setState }) {
                       </div>
                     )}
 
+                    <div style={rowStyle}>
+                      <span style={labelStyle}>🏦 Savings</span>
+                      <input type="number" placeholder="% of salary" value={eventForm.savingsPct||""} onChange={e=>setEventForm(f=>({...f,savingsPct:e.target.value}))} style={{...inputStyle,flex:1}} />
+                    </div>
                     <div style={rowStyle}>
                       <span style={labelStyle}>💼 401k + Match</span>
                       <input type="number" placeholder="% of salary" value={eventForm.k401Pct} onChange={e => setEventForm(f => ({ ...f, k401Pct: e.target.value }))} style={inputStyle} />
@@ -907,12 +950,24 @@ const TICKERS = [
   "BA","CAT","GE","TSM","IBIT","PLTR"
 ];
 
+const MOCK_QUOTES = {
+  SPY:{c:594.21,dp:0.42},QQQ:{c:512.87,dp:0.68},DIA:{c:439.15,dp:0.31},IWM:{c:211.34,dp:0.55},VTI:{c:287.63,dp:0.44},
+  AAPL:{c:213.55,dp:1.12},MSFT:{c:447.23,dp:0.87},NVDA:{c:137.42,dp:2.31},GOOGL:{c:192.18,dp:0.76},META:{c:612.44,dp:1.43},
+  AMZN:{c:224.87,dp:0.93},TSLA:{c:248.33,dp:-1.24},AVGO:{c:237.61,dp:1.08},AMD:{c:168.92,dp:-0.43},INTC:{c:21.87,dp:-0.88},
+  CRM:{c:318.45,dp:0.62},ORCL:{c:192.76,dp:0.34},ADBE:{c:432.11,dp:-0.21},NFLX:{c:1124.55,dp:1.77},QCOM:{c:174.23,dp:0.55},
+  MU:{c:107.44,dp:1.34},UBER:{c:88.12,dp:0.91},JPM:{c:268.34,dp:0.48},BAC:{c:46.22,dp:0.33},WFC:{c:78.91,dp:0.27},
+  GS:{c:612.88,dp:0.82},V:{c:358.44,dp:0.59},MA:{c:547.21,dp:0.71},"BRK.B":{c:514.33,dp:0.38},JNJ:{c:155.22,dp:-0.14},
+  UNH:{c:312.45,dp:-0.87},PFE:{c:24.11,dp:-0.33},ABBV:{c:187.63,dp:0.44},LLY:{c:798.44,dp:1.23},MRK:{c:97.88,dp:-0.21},
+  XOM:{c:118.33,dp:0.76},CVX:{c:152.44,dp:0.52},WMT:{c:97.22,dp:0.38},HD:{c:387.61,dp:0.44},MCD:{c:312.88,dp:0.19},
+  NKE:{c:76.44,dp:-0.62},COST:{c:1012.33,dp:0.87},PG:{c:172.44,dp:0.22},KO:{c:71.88,dp:0.17},PEP:{c:148.22,dp:-0.08},
+  BA:{c:188.44,dp:-0.93},CAT:{c:387.21,dp:0.61},GE:{c:212.88,dp:0.77},TSM:{c:192.33,dp:1.44},IBIT:{c:57.22,dp:2.11},PLTR:{c:31.44,dp:3.22}
+};
+
 function TickerBar() {
-  const [quotes, setQuotes] = useState({});
-  const [status, setStatus] = useState("loading");
+  const [quotes, setQuotes] = useState(MOCK_QUOTES);
+  const [live, setLive]     = useState(false);
 
   const load = useCallback(async () => {
-    // Fetch in 2 batches to respect Finnhub rate limits
     const fetchBatch = async (tickers) => {
       const results = await Promise.all(
         tickers.map(t =>
@@ -931,19 +986,13 @@ function TickerBar() {
         new Promise(res => setTimeout(() => fetchBatch(TICKERS.slice(half)).then(res), 1100))
       ]);
       const next = {...a, ...b};
-      if (Object.keys(next).length) { setQuotes(next); setStatus("ok"); }
-      else setStatus("err");
-    } catch(e) { setStatus("err"); }
+      if (Object.keys(next).length > 5) { setQuotes(next); setLive(true); }
+    } catch(e) {}
   }, []);
 
   useEffect(() => { load(); const id = setInterval(load, 120000); return () => clearInterval(id); }, [load]);
 
   const barStyle = { height:30, background:"#08080f", borderBottom:"1px solid rgba(255,255,255,0.08)", overflow:"hidden", flexShrink:0, position:"relative" };
-
-  if (status === "loading" && !Object.keys(quotes).length)
-    return <div style={{...barStyle,display:"flex",alignItems:"center",paddingLeft:14,fontSize:11,color:"rgba(255,255,255,0.3)"}}>Loading market data…</div>;
-  if (status === "err" && !Object.keys(quotes).length)
-    return <div style={{...barStyle,display:"flex",alignItems:"center",paddingLeft:14,fontSize:11,color:"rgba(255,255,255,0.25)"}}>Market data unavailable</div>;
 
   const filled = TICKERS.filter(t => quotes[t]);
   const Item = ({t}) => {
@@ -960,6 +1009,7 @@ function TickerBar() {
 
   return (
     <div style={barStyle} title="Hover to pause">
+      {!live && <div style={{position:"absolute",right:6,top:"50%",transform:"translateY(-50%)",fontSize:9,color:"rgba(255,255,255,0.2)",zIndex:2,background:"#08080f",padding:"0 4px"}}>demo</div>}
       <div className="ticker-track">
         {filled.map(t => <Item key={t+"a"} t={t}/>)}
         {filled.map(t => <Item key={t+"b"} t={t}/>)}
@@ -1017,10 +1067,10 @@ export default function App() {
         {/* Right column: ticker + content */}
         <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
           <TickerBar />
-          <main style={{ flex: 1, overflow: "hidden", position: "relative", background: "#0a0a12" }}>
+          <main style={{ flex: 1, overflow: "hidden", position: "relative", backgroundImage:`url(${BG[active]||BG.roadmap})`, backgroundSize:"cover", backgroundPosition:"center" }}>
           {active === "roadmap" && <RoadmapPanel state={state} setState={setState} />}
           {active !== "roadmap" && (
-            <div style={{ padding: "2rem", color: T.text1 }}>
+            <div style={{ padding: "2rem", color: T.text1, background: "rgba(10,10,18,0.72)", height: "100%", boxSizing: "border-box" }}>
               <div style={{ fontSize: 20, fontWeight: 700, color: "#fff", marginBottom: 8 }}>{NAV.find(n => n.id === active)?.label}</div>
               <p style={{ color: T.text2 }}>Coming soon. Build your roadmap in the Roadmap tab.</p>
             </div>

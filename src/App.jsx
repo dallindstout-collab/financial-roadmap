@@ -43,6 +43,9 @@ input::placeholder{color:#55556a}
 button{cursor:pointer;font-family:inherit}
 ::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:#2a2a3a;border-radius:2px}
 @keyframes pulse{0%,100%{box-shadow:0 0 8px rgba(129,140,248,0.3)}50%{box-shadow:0 0 18px rgba(129,140,248,0.6)}}
+@keyframes ticker-scroll{0%{transform:translateX(0)}100%{transform:translateX(-50%)}}
+.ticker-track{display:inline-flex;animation:ticker-scroll 120s linear infinite;white-space:nowrap}
+.ticker-track:hover{animation-play-state:paused}
 .pulse-btn{animation:pulse 2.5s ease-in-out infinite}
 .dual-range-wrap{position:relative;height:24px;display:flex;align-items:center}
 .dual-range-track{position:absolute;left:0;right:0;height:4px;border-radius:2px;background:rgba(255,255,255,0.12)}
@@ -893,52 +896,74 @@ function RoadmapPanel({ state, setState }) {
 }
 
 const FINNHUB_KEY = "d8do22pr01qhm4ag8c30d8do22pr01qhm4ag8c3g";
-const TICKERS = ["SPY","QQQ","AAPL","MSFT","NVDA","GOOGL","AMZN","TSLA","JPM","MU"];
+const TICKERS = [
+  "SPY","QQQ","DIA","IWM","VTI",
+  "AAPL","MSFT","NVDA","GOOGL","META","AMZN","TSLA","AVGO","AMD","INTC",
+  "CRM","ORCL","ADBE","NFLX","QCOM","MU","UBER",
+  "JPM","BAC","WFC","GS","V","MA","BRK.B",
+  "JNJ","UNH","PFE","ABBV","LLY","MRK",
+  "XOM","CVX",
+  "WMT","HD","MCD","NKE","COST","PG","KO","PEP",
+  "BA","CAT","GE","TSM","IBIT","PLTR"
+];
 
 function TickerBar() {
   const [quotes, setQuotes] = useState({});
   const [status, setStatus] = useState("loading");
 
   const load = useCallback(async () => {
-    try {
+    // Fetch in 2 batches to respect Finnhub rate limits
+    const fetchBatch = async (tickers) => {
       const results = await Promise.all(
-        TICKERS.map(t =>
+        tickers.map(t =>
           fetch(`https://finnhub.io/api/v1/quote?symbol=${t}&token=${FINNHUB_KEY}`)
-            .then(r => r.ok ? r.json() : null)
-            .catch(() => null)
+            .then(r => r.ok ? r.json() : null).catch(() => null)
         )
       );
-      const next = {};
-      results.forEach((d, i) => { if (d && d.c) next[TICKERS[i]] = d; });
+      const out = {};
+      results.forEach((d, i) => { if (d?.c) out[tickers[i]] = d; });
+      return out;
+    };
+    try {
+      const half = Math.ceil(TICKERS.length / 2);
+      const [a, b] = await Promise.all([
+        fetchBatch(TICKERS.slice(0, half)),
+        new Promise(res => setTimeout(() => fetchBatch(TICKERS.slice(half)).then(res), 1100))
+      ]);
+      const next = {...a, ...b};
       if (Object.keys(next).length) { setQuotes(next); setStatus("ok"); }
       else setStatus("err");
     } catch(e) { setStatus("err"); }
   }, []);
 
-  useEffect(() => { load(); const id = setInterval(load, 90000); return () => clearInterval(id); }, [load]);
+  useEffect(() => { load(); const id = setInterval(load, 120000); return () => clearInterval(id); }, [load]);
 
-  const barStyle = {height:28,background:"#08080f",borderBottom:"1px solid rgba(255,255,255,0.08)",display:"flex",alignItems:"center",overflow:"hidden",flexShrink:0};
+  const barStyle = { height:30, background:"#08080f", borderBottom:"1px solid rgba(255,255,255,0.08)", overflow:"hidden", flexShrink:0, position:"relative" };
 
   if (status === "loading" && !Object.keys(quotes).length)
-    return <div style={{...barStyle,paddingLeft:14,fontSize:11,color:"rgba(255,255,255,0.3)"}}>Loading market data…</div>;
+    return <div style={{...barStyle,display:"flex",alignItems:"center",paddingLeft:14,fontSize:11,color:"rgba(255,255,255,0.3)"}}>Loading market data…</div>;
   if (status === "err" && !Object.keys(quotes).length)
-    return <div style={{...barStyle,paddingLeft:14,fontSize:11,color:"rgba(255,255,255,0.25)"}}>Market data unavailable</div>;
+    return <div style={{...barStyle,display:"flex",alignItems:"center",paddingLeft:14,fontSize:11,color:"rgba(255,255,255,0.25)"}}>Market data unavailable</div>;
+
+  const filled = TICKERS.filter(t => quotes[t]);
+  const Item = ({t}) => {
+    const q = quotes[t];
+    const up = q.dp >= 0;
+    return (
+      <div style={{display:"inline-flex",alignItems:"center",gap:6,padding:"0 18px",borderRight:"1px solid rgba(255,255,255,0.06)",height:30}}>
+        <span style={{fontSize:11,fontWeight:700,color:"rgba(255,255,255,0.9)",fontFamily:"monospace",letterSpacing:"0.04em"}}>{t}</span>
+        <span style={{fontSize:11,color:"rgba(255,255,255,0.5)",fontFamily:"monospace"}}>${Number(q.c).toFixed(2)}</span>
+        <span style={{fontSize:10,fontWeight:700,color:up?"#4ade80":"#f87171",fontFamily:"monospace"}}>{up?"▲":"▼"}{Math.abs(q.dp).toFixed(2)}%</span>
+      </div>
+    );
+  };
 
   return (
-    <div style={barStyle}>
-      {TICKERS.filter(t => quotes[t]).map(t => {
-        const q = quotes[t];
-        const up = q.dp >= 0;
-        return (
-          <div key={t} style={{display:"flex",alignItems:"center",gap:5,padding:"0 12px",borderRight:"1px solid rgba(255,255,255,0.06)",flexShrink:0}}>
-            <span style={{fontSize:11,fontWeight:700,color:"rgba(255,255,255,0.85)",fontFamily:"monospace"}}>{t}</span>
-            <span style={{fontSize:11,color:"rgba(255,255,255,0.55)",fontFamily:"monospace"}}>${q.c?.toFixed(2)}</span>
-            <span style={{fontSize:10,fontWeight:600,color:up?"#4ade80":"#f87171",fontFamily:"monospace"}}>{up?"+":""}{q.dp?.toFixed(2)}%</span>
-          </div>
-        );
-      })}
-      <div style={{flex:1}}/>
-      <div style={{padding:"0 10px",fontSize:9,color:"rgba(255,255,255,0.2)",flexShrink:0}}>Finnhub · 90s</div>
+    <div style={barStyle} title="Hover to pause">
+      <div className="ticker-track">
+        {filled.map(t => <Item key={t+"a"} t={t}/>)}
+        {filled.map(t => <Item key={t+"b"} t={t}/>)}
+      </div>
     </div>
   );
 }
